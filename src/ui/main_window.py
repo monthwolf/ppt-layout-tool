@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+import os
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
                            QPushButton, QSpinBox, QLabel, QFileDialog, 
                            QScrollArea, QGroupBox, QDoubleSpinBox, QMessageBox,
@@ -5,16 +8,13 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                            QStatusBar, QToolButton, QTabWidget, QWizard, 
                            QWizardPage, QStackedWidget, QRadioButton, QButtonGroup,
                            QCheckBox, QTextEdit, QApplication)
-from PyQt6.QtCore import Qt, QRectF, QSize, QThread, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QByteArray, QRect
-from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon, QMovie, QPainterPath
+from PyQt6.QtCore import Qt, QRectF, QSize, QThread, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QByteArray, QRect, QSettings, QUrl, QTimer
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon, QMovie, QPainterPath, QAction, QDesktopServices
 from PyQt6.QtSvg import QSvgRenderer
 
-import os
 from pptx import Presentation
 from PIL import Image
 import io
-from pathlib import Path
-import sys
 
 from src.utils.ppt_processor import PPTProcessor
 from src.utils.layout_calculator import LayoutCalculator
@@ -24,14 +24,14 @@ from src.ui.worker import Worker
 from src.ui.spinner_widget import SpinnerWidget
 
 def get_resource_path(relative_path):
-    """Constructs the absolute path for a resource."""
+    """一个健壮的函数，用于在开发和打包环境中都能找到资源文件。"""
     try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
+        # PyInstaller 在运行时会创建一个临时文件夹，并将其路径存储在 _MEIPASS 中
+        base_path = sys._MEIPASS  # type: ignore
     except Exception:
-        # For development, go up two directories from this file (src/ui -> ppt/)
+        # 在开发环境中，我们从当前文件向上回溯两层以找到项目根目录
         base_path = Path(__file__).resolve().parents[2]
-    return str(base_path / relative_path)
+    return str(Path(base_path) / relative_path)
 
 class AnimatedStackedWidget(QStackedWidget):
     """一个支持平滑滑动动画的QStackedWidget"""
@@ -43,23 +43,20 @@ class AnimatedStackedWidget(QStackedWidget):
         self.m_next = 0
         self.m_active = False
 
-    def set_animation(self, animation_type):
-        self.m_animation_type = animation_type
-
     def slide_in_next(self):
         now_widget = self.widget(self.m_now)
         next_widget = self.widget(self.m_next)
         
         anim_group = QParallelAnimationGroup(self)
 
-        anim_now = QPropertyAnimation(now_widget, QByteArray(b"geometry"))
+        anim_now = QPropertyAnimation(now_widget, b"geometry") # type: ignore
         anim_now.setDuration(self.m_speed)
         anim_now.setEasingCurve(self.m_animation_type)
         anim_now.setStartValue(QRect(0, 0, self.width(), self.height()))
         anim_now.setEndValue(QRect(-self.width(), 0, self.width(), self.height()))
         anim_group.addAnimation(anim_now)
 
-        anim_next = QPropertyAnimation(next_widget, QByteArray(b"geometry"))
+        anim_next = QPropertyAnimation(next_widget, b"geometry") # type: ignore
         anim_next.setDuration(self.m_speed)
         anim_next.setEasingCurve(self.m_animation_type)
         anim_next.setStartValue(QRect(self.width(), 0, self.width(), self.height()))
@@ -76,14 +73,14 @@ class AnimatedStackedWidget(QStackedWidget):
 
         anim_group = QParallelAnimationGroup(self)
 
-        anim_now = QPropertyAnimation(now_widget, QByteArray(b"geometry"))
+        anim_now = QPropertyAnimation(now_widget, b"geometry") # type: ignore
         anim_now.setDuration(self.m_speed)
         anim_now.setEasingCurve(self.m_animation_type)
         anim_now.setStartValue(QRect(0, 0, self.width(), self.height()))
         anim_now.setEndValue(QRect(self.width(), 0, self.width(), self.height()))
         anim_group.addAnimation(anim_now)
 
-        anim_next = QPropertyAnimation(next_widget, QByteArray(b"geometry"))
+        anim_next = QPropertyAnimation(next_widget, b"geometry") # type: ignore
         anim_next.setDuration(self.m_speed)
         anim_next.setEasingCurve(self.m_animation_type)
         anim_next.setStartValue(QRect(-self.width(), 0, self.width(), self.height()))
@@ -99,17 +96,18 @@ class AnimatedStackedWidget(QStackedWidget):
             return
         
         self.m_next = index
-        current_widget = self.widget(self.m_now)
         next_widget = self.widget(self.m_next)
         next_widget.setGeometry(0, 0, self.width(), self.height())
 
         if index > self.m_now:
             next_widget.move(self.width(), 0)
-            next_widget.show()
-            self.slide_in_next()
         elif index < self.m_now:
             next_widget.move(-self.width(), 0)
-            next_widget.show()
+        
+        next_widget.show()
+        if index > self.m_now:
+            self.slide_in_next()
+        else:
             self.slide_in_prev()
 
     def animation_done(self):
@@ -119,7 +117,7 @@ class AnimatedStackedWidget(QStackedWidget):
         self.m_now = self.m_next
 
 class StepIndicator(QFrame):
-    """A modernized, animated step indicator"""
+    """一个现代化的、带动画效果的步骤指示器"""
     def __init__(self, steps, parent=None):
         super().__init__(parent)
         self.steps = steps
@@ -136,34 +134,29 @@ class StepIndicator(QFrame):
             step_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             step_layout.setContentsMargins(5, 0, 5, 0)
 
-            # This will hold either the number, the spinner, or the checkmark
-            self.icon_container = QStackedWidget()
-            self.icon_container.setFixedSize(32, 32)
+            icon_stack = QStackedWidget()
+            icon_stack.setFixedSize(32, 32)
             
-            # 0: Number Label
             number_label = QLabel(str(i + 1))
             number_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             number_label.setStyleSheet(f"background-color: {COLORS['divider']}; border-radius: 16px; color: {COLORS['text_secondary']}; font-weight: normal;")
-            self.icon_container.addWidget(number_label)
+            icon_stack.addWidget(number_label)
 
-            # 1: Spinner
             spinner = SpinnerWidget()
-            self.icon_container.addWidget(spinner)
+            icon_stack.addWidget(spinner)
 
-            # 2: Checkmark
             check_label = QLabel()
             check_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            check_pixmap = self._create_check_pixmap()
-            check_label.setPixmap(check_pixmap)
-            self.icon_container.addWidget(check_label)
+            check_label.setPixmap(self._create_check_pixmap())
+            icon_stack.addWidget(check_label)
             
             text_label = QLabel(step_text)
             
-            step_layout.addWidget(self.icon_container, 0, Qt.AlignmentFlag.AlignCenter)
+            step_layout.addWidget(icon_stack, 0, Qt.AlignmentFlag.AlignCenter)
             step_layout.addWidget(text_label, 0, Qt.AlignmentFlag.AlignCenter)
             
             layout.addWidget(step_container)
-            self.step_widgets.append({'icons': self.icon_container, 'text': text_label, 'spinner': spinner})
+            self.step_widgets.append({'icons': icon_stack, 'text': text_label, 'spinner': spinner})
             
             if i < len(steps) - 1:
                 line = QFrame()
@@ -182,139 +175,147 @@ class StepIndicator(QFrame):
         p.setPen(Qt.GlobalColor.transparent)
         p.drawEllipse(0, 0, 32, 32)
         
-        check_svg_path = get_resource_path("resources/check.svg")
-        renderer = QSvgRenderer(check_svg_path)
+        renderer = QSvgRenderer(get_resource_path("resources/check.svg"))
         renderer.render(p, QRectF(6, 6, 20, 20))
         p.end()
         return pixmap
 
     def set_current_step(self, step):
         if 0 <= step < len(self.steps):
-            self.current_step = step
-            
+            for i, widget_group in enumerate(self.step_widgets):
+                widget_group['spinner'].stop()
+
             for i, widget_group in enumerate(self.step_widgets):
                 icons = widget_group['icons']
                 text = widget_group['text']
-                spinner = widget_group['spinner']
-
-                spinner.stop() # Stop all spinners first
-
                 if i < step:
-                    # Completed
                     icons.setCurrentIndex(2)
                     text.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: normal;")
-                    
                 elif i == step:
-                    # Current
                     icons.setCurrentIndex(1)
-                    spinner.start()
+                    widget_group['spinner'].start()
                     text.setStyleSheet(f"color: {COLORS['primary']}; font-weight: bold;")
-                    
                 else:
-                    # Pending
                     icons.setCurrentIndex(0)
                     text.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: normal;")
+            self.current_step = step
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PPT布局工具")
+        self.setWindowTitle("PPT 布局工具")
         self.setMinimumSize(1100, 800)
-        
+        self.setWindowIcon(QIcon(get_resource_path("resources/app_icon.svg")))
+
         self.ppt_processor = PPTProcessor()
         self.layout_calculator = LayoutCalculator()
         
         self.current_ppt_path = None
         self.slide_images = []
         self.layout_config = {
-            "columns": 2,  # 默认每行2列
-            "page_width": 210,  # A4宽度(mm)
-            "page_height": 297,  # A4高度(mm)
-            "margin_left": 10,
-            "margin_top": 10,
-            "margin_right": 10,
-            "margin_bottom": 10,
-            "h_spacing": 5,  # 水平间距(mm)
-            "v_spacing": 5,  # 垂直间距(mm)
-            "is_landscape": True,  # 默认为横向A4
-            "show_ppt_numbers": True,  # 显示PPT定位页码
-            "show_page_numbers": True,  # 显示纸张页码
+            "columns": 2, "page_width": 210, "page_height": 297,
+            "margin_left": 10, "margin_top": 10, "margin_right": 10, "margin_bottom": 10,
+            "h_spacing": 5, "v_spacing": 5, "is_landscape": True,
+            "show_ppt_numbers": True, "show_page_numbers": True,
         }
         
-        self.current_step = 0
-        
-        # 应用样式表
         self.setStyleSheet(STYLESHEET)
         
         self.init_ui()
         self.init_loading_overlay()
+        self.init_menu()
         
-        # 显示欢迎界面
         self.show_welcome_screen()
         
-        # 创建状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("准备就绪")
-    
+
+        # 检查是否首次启动
+        QTimer.singleShot(100, self.check_first_launch)
+
+    def check_first_launch(self):
+        settings = QSettings("monthwolf", "PPTLayoutTool")
+        if settings.value("firstLaunch", True, type=bool):
+            self.show_about_dialog()
+            settings.setValue("firstLaunch", False)
+            
+    def show_about_dialog(self):
+        about_text = """
+            <h2 style="font-size: 18px; color: #333;">PPT 布局工具 v1.0</h2>
+            <p style="font-size: 13px; color: #555;">一款现代、高效的PPT排版与索引生成工具。</p>
+            <p style="font-size: 13px; color: #555;">作者：<b>monthwolf</b></p>
+            <p style="font-size: 13px; color: #555;">
+                联系方式：<a href='mailto:1369755540@qq.com' style="color: #4A90E2; text-decoration: none;">1369755540@qq.com</a>
+            </p>
+            <hr style="border: none; border-top: 1px solid #EAEAEA; margin: 12px 0;">
+            <p style="font-size: 12px; color: #777;">
+                <a href='https://github.com/monthwolf/ppt-layout-tool' style="color: #4A90E2; text-decoration: none;">项目源码</a> &nbsp;|&nbsp; 
+                <a href='https://github.com/monthwolf/ppt-layout-tool/issues' style="color: #4A90E2; text-decoration: none;">报告问题</a> &nbsp;|&nbsp;
+                <a href='https://github.com/monthwolf' style="color: #4A90E2; text-decoration: none;">作者主页</a>
+            </p>
+        """
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("关于")
+        msg_box.setTextFormat(Qt.TextFormat.RichText)
+        msg_box.setText(about_text)
+        msg_box.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        msg_box.exec()
+
+    def init_menu(self):
+        menu_bar = self.menuBar()
+        help_menu = menu_bar.addMenu("帮助")
+        about_action = QAction("关于", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
+
     def init_loading_overlay(self):
-        """初始化加载覆盖层"""
         self.loading_overlay = LoadingOverlay(self)
     
     def resizeEvent(self, event):
-        """确保覆盖层始终与主窗口大小一致"""
         super().resizeEvent(event)
         if hasattr(self, 'loading_overlay'):
             self.loading_overlay.resize(event.size())
-    
+
     def init_ui(self):
-        """初始化UI界面"""
         central_widget = QWidget()
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(20)
         
-        # 添加步骤指示器
         self.step_indicator = StepIndicator(STEPS_GUIDE)
         main_layout.addWidget(self.step_indicator)
         
-        # 创建堆叠式部件用于不同步骤的界面
         self.stacked_widget = AnimatedStackedWidget()
         
-        # 创建各步骤页面
-        self.create_step1_page()  # 文件选择页面
-        self.create_step2_page()  # 布局设置页面
-        self.create_step3_page()  # 预览页面
-        self.create_step4_page()  # 导出页面
-        self.create_step5_page()  # AI索引页面
+        self.create_step1_page()
+        self.create_step2_page()
+        self.create_step3_page()
+        self.create_step4_page()
+        self.create_step5_page()
         
         main_layout.addWidget(self.stacked_widget)
         
-        # 创建导航按钮
         nav_layout = QHBoxLayout()
-        
-        # 占位空间
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         nav_layout.addWidget(spacer)
         
-        # 上一步按钮
         self.prev_btn = QPushButton("< 上一步")
         self.prev_btn.clicked.connect(self.go_to_prev_step)
         self.prev_btn.setEnabled(False)
         nav_layout.addWidget(self.prev_btn)
         
-        # 下一步按钮
         self.next_btn = QPushButton("下一步 >")
         self.next_btn.setObjectName("accentButton")
         self.next_btn.clicked.connect(self.go_to_next_step)
-        self.next_btn.setEnabled(False)  # 初始状态禁用，等待选择文件
+        self.next_btn.setEnabled(False)
         nav_layout.addWidget(self.next_btn)
         
         main_layout.addLayout(nav_layout)
         
         self.setCentralWidget(central_widget)
-    
+
     def create_step1_page(self):
         """创建步骤1：选择PPT文件页面"""
         page = QWidget()
@@ -654,56 +655,36 @@ class MainWindow(QMainWindow):
         self.file_preview.setText(WELCOME_TEXT)
     
     def go_to_next_step(self):
-        """前往下一步"""
         current_index = self.stacked_widget.currentIndex()
         
-        # 验证当前步骤
         if current_index == 0 and not self.slide_images:
             QMessageBox.warning(self, "警告", "请先选择PPT文件！")
             return
-        elif current_index == 2:
-            # 如果从预览到导出，更新导出摘要信息
-            layout_result = self.layout_calculator.calculate_layout(
-                self.slide_images, self.layout_config
-            )
+        elif current_index == 3:
+            self.go_to_ai_step()
+            return
             
-            orientation_text = "横向" if self.layout_config["is_landscape"] else "纵向"
-            summary = f"<p>将导出 <b>{len(self.slide_images)}</b> 张PPT幻灯片</p>"
-            summary += f"<p>页面方向: <b>{orientation_text}A4</b></p>"
-            summary += f"<p>布局: 每页 <b>{layout_result['rows']}</b> 行 × <b>{layout_result['columns']}</b> 列</p>"
-            summary += f"<p>预计页数: <b>{layout_result['pages_needed']}</b> 页PDF</p>"
-            summary += "<p>点击「仅导出内容PDF」按钮选择保存位置并开始导出</p>"
+        if current_index < self.stacked_widget.count() - 1:
+            if current_index == 2:
+                self._update_export_summary()
             
-            self.export_summary.setText(summary)
-            # 重置第四步状态
-            self.export_result.setText("点击上方按钮开始导出")
-            self.ai_index_button.setVisible(False)
-            
-        # 前往下一步
-        if current_index < self.stacked_widget.count() - 2: # Stop before AI step
-            self.stacked_widget.setCurrentIndex(current_index + 1)
             self.step_indicator.set_current_step(current_index + 1)
+            self.stacked_widget.setCurrentIndex(current_index + 1)
             
-            # 如果是前往预览页面，立即刷新预览
-            if current_index == 1:
+            if self.stacked_widget.currentIndex() == 2:
                 self.refresh_preview()
             
-            # 更新按钮状态
             self.prev_btn.setEnabled(True)
-            self.next_btn.setEnabled(current_index < self.stacked_widget.count() - 3)
-    
+            self.next_btn.setEnabled(current_index < self.stacked_widget.count() - 2)
+
     def go_to_prev_step(self):
-        """返回上一步"""
         current_index = self.stacked_widget.currentIndex()
-        
         if current_index > 0:
-            self.stacked_widget.setCurrentIndex(current_index - 1)
             self.step_indicator.set_current_step(current_index - 1)
-            
-            # 更新按钮状态
+            self.stacked_widget.setCurrentIndex(current_index - 1)
             self.next_btn.setEnabled(True)
             self.prev_btn.setEnabled(current_index > 1)
-    
+
     def select_ppt_file(self):
         """选择PPT文件并使用工作线程进行处理"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -751,15 +732,15 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("文件处理失败")
 
     def _on_task_error(self, exception):
-        """处理工作线程中的错误"""
         self.loading_overlay.hide()
         error_message = f"发生了一个错误: \n{str(exception)}"
         QMessageBox.critical(self, "操作失败", error_message)
         print(f"工作线程错误: {exception}")
         
-        # 重置可能被禁用的按钮
+        # 重置所有可能被禁用的按钮
         self.export_btn.setEnabled(True)
-        self.final_export_btn.setEnabled(True)
+        if hasattr(self, 'final_export_btn'):
+            self.final_export_btn.setEnabled(True)
         self.status_bar.showMessage("操作失败", 5000)
 
     def update_orientation(self):
@@ -1083,6 +1064,17 @@ class MainWindow(QMainWindow):
         else:
             self.final_export_result.setText(f"<p style='color:{COLORS['error']};'><b>最终PDF生成失败!</b></p><p>请检查日志获取详细信息。</p>")
             QMessageBox.critical(self, "失败", "生成最终PDF时出错，请检查日志。")
+    
+    def _update_export_summary(self):
+        layout_result = self.layout_calculator.calculate_layout(self.slide_images, self.layout_config)
+        orientation_text = "横向" if self.layout_config["is_landscape"] else "纵向"
+        summary = f"<p>将导出 <b>{len(self.slide_images)}</b> 张PPT幻灯片</p>"
+        summary += f"<p>页面方向: <b>{orientation_text}A4</b></p>"
+        summary += f"<p>布局: 每页 <b>{layout_result['rows']}</b> 行 × <b>{layout_result['columns']}</b> 列</p>"
+        summary += f"<p>预计页数: <b>{layout_result['pages_needed']}</b> 页PDF</p>"
+        self.export_summary.setText(summary)
+        self.export_result.setText("点击下方按钮开始导出")
+        self.ai_index_button.setVisible(False)
     
     def closeEvent(self, event):
         """程序关闭时清理临时文件"""

@@ -139,16 +139,22 @@ STYLESHEET = f"""
 
 # 欢迎语
 WELCOME_TEXT = """
-<h1 style="color: #333; font-size: 24px;">欢迎使用PPT布局工具</h1>
-<p style="color: #555; font-size: 14px;">
-  本工具可以帮助您轻松地将PPT幻灯片排版到A4纸上并导出为PDF。<br>
-  请从左侧选择一个PPT文件开始您的旅程。
-</p>
-<ul style="color: #555; text-align: left; padding-left: 30px;">
-  <li>支持 <b>.pptx</b> 和 <b>.ppt</b> 文件格式</li>
-  <li>灵活的布局与页码设置</li>
-  <li>可选的AI智能索引生成</li>
-</ul>
+<div style="text-align: center; padding: 20px;">
+  <h1 style="color: #333; font-size: 28px; font-weight: 600; margin-bottom: 10px;">
+    欢迎使用 PPT 布局工具
+  </h1>
+  <p style="color: #555; font-size: 15px; max-width: 450px; margin: 0 auto 25px auto;">
+    一个现代、高效的工具，旨在将您的演示文稿轻松排版为专业、整洁的PDF文档。
+  </p>
+  <div style="text-align: center; max-width: 400px; margin: 0 auto; line-height: 1.8;">
+    <p><b>✓ 灵活布局：</b>自由定义每页的行列数量与间距。</p>
+    <p><b>✓ 智能预览：</b>在导出前实时查看最终布局效果。</p>
+    <p><b>✓ AI 索引：</b>一键生成提示词，利用AI创建专业索引。</p>
+  </div>
+  <p style="color: #888; font-size: 13px; margin-top: 30px;">
+    请点击左上角的"选择PPT文件"按钮，开始您的创作之旅。
+  </p>
+</div>
 """
 
 # 步骤指引
