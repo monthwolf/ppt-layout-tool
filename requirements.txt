@@ -1,0 +1,8 @@
+PyQt6==6.4.2
+pyqt6-tools==6.4.2.3.3
+python-pptx==0.6.21
+comtypes==1.1.14
+Pillow==9.5.0
+reportlab==3.6.12
+qt-material==2.14
+darkdetect==0.8.0 

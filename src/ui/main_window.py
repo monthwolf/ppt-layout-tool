@@ -1,0 +1,754 @@
+from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
+                           QPushButton, QSpinBox, QLabel, QFileDialog, 
+                           QScrollArea, QGroupBox, QDoubleSpinBox, QMessageBox,
+                           QSizePolicy, QFrame, QGridLayout, QProgressBar,
+                           QStatusBar, QToolButton, QTabWidget, QWizard, 
+                           QWizardPage, QStackedWidget, QRadioButton, QButtonGroup)
+from PyQt6.QtCore import Qt, QRectF, QSize
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon
+
+import os
+from pptx import Presentation
+from PIL import Image
+import io
+
+from src.utils.ppt_processor import PPTProcessor
+from src.utils.layout_calculator import LayoutCalculator
+from src.ui.styles import STYLESHEET, COLORS, WELCOME_TEXT, STEPS_GUIDE
+
+class StepIndicator(QFrame):
+    """步骤指示器组件"""
+    def __init__(self, steps, parent=None):
+        super().__init__(parent)
+        self.steps = steps
+        self.current_step = 0
+        
+        # 创建布局
+        layout = QHBoxLayout(self)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 10, 0, 10)
+        
+        # 创建步骤指示器
+        self.step_labels = []
+        for i, step_text in enumerate(steps):
+            # 步骤圆圈
+            step_frame = QFrame()
+            step_frame.setFixedSize(32, 32)
+            step_frame.setObjectName("stepCircle")
+            step_frame.setStyleSheet(f"""
+                QFrame#stepCircle {{
+                    background-color: {COLORS['divider']};
+                    border-radius: 16px;
+                    color: {COLORS['text_secondary']};
+                }}
+            """)
+            
+            # 步骤数字
+            step_number = QLabel(str(i + 1))
+            step_number.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            step_number_layout = QVBoxLayout(step_frame)
+            step_number_layout.setContentsMargins(0, 0, 0, 0)
+            step_number_layout.addWidget(step_number)
+            
+            # 步骤文本
+            step_label = QLabel(step_text)
+            step_label.setObjectName(f"stepLabel{i}")
+            
+            # 添加到布局
+            step_container = QVBoxLayout()
+            step_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            step_container.addWidget(step_frame, 0, Qt.AlignmentFlag.AlignCenter)
+            step_container.addWidget(step_label, 0, Qt.AlignmentFlag.AlignCenter)
+            
+            layout.addLayout(step_container)
+            self.step_labels.append((step_frame, step_label))
+            
+            # 添加连接线（除了最后一步）
+            if i < len(steps) - 1:
+                line = QFrame()
+                line.setFrameShape(QFrame.Shape.HLine)
+                line.setFixedHeight(2)
+                line.setStyleSheet(f"background-color: {COLORS['divider']};")
+                line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                layout.addWidget(line)
+    
+    def set_current_step(self, step):
+        if 0 <= step < len(self.steps):
+            self.current_step = step
+            
+            for i, (circle, label) in enumerate(self.step_labels):
+                if i < step:
+                    # 已完成步骤
+                    circle.setStyleSheet(f"""
+                        QFrame#stepCircle {{
+                            background-color: {COLORS['success']};
+                            border-radius: 16px;
+                            color: white;
+                        }}
+                    """)
+                elif i == step:
+                    # 当前步骤
+                    circle.setStyleSheet(f"""
+                        QFrame#stepCircle {{
+                            background-color: {COLORS['primary']};
+                            border-radius: 16px;
+                            color: white;
+                        }}
+                    """)
+                    label.setStyleSheet(f"font-weight: bold; color: {COLORS['primary']};")
+                else:
+                    # 未完成步骤
+                    circle.setStyleSheet(f"""
+                        QFrame#stepCircle {{
+                            background-color: {COLORS['divider']};
+                            border-radius: 16px;
+                            color: {COLORS['text_secondary']};
+                        }}
+                    """)
+                    label.setStyleSheet("")
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("PPT布局工具")
+        self.setMinimumSize(1100, 800)
+        
+        self.ppt_processor = PPTProcessor()
+        self.layout_calculator = LayoutCalculator()
+        
+        self.current_ppt_path = None
+        self.slide_images = []
+        self.layout_config = {
+            "columns": 2,  # 默认每行2列
+            "page_width": 210,  # A4宽度(mm)
+            "page_height": 297,  # A4高度(mm)
+            "margin_left": 10,
+            "margin_top": 10,
+            "margin_right": 10,
+            "margin_bottom": 10,
+            "h_spacing": 5,  # 水平间距(mm)
+            "v_spacing": 5,  # 垂直间距(mm)
+            "is_landscape": True,  # 默认为横向A4
+        }
+        
+        self.current_step = 0
+        
+        # 应用样式表
+        self.setStyleSheet(STYLESHEET)
+        
+        self.init_ui()
+        
+        # 显示欢迎界面
+        self.show_welcome_screen()
+        
+        # 创建状态栏
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("准备就绪")
+    
+    def init_ui(self):
+        """初始化UI界面"""
+        central_widget = QWidget()
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(20)
+        
+        # 添加步骤指示器
+        self.step_indicator = StepIndicator(STEPS_GUIDE)
+        main_layout.addWidget(self.step_indicator)
+        
+        # 创建堆叠式部件用于不同步骤的界面
+        self.stacked_widget = QStackedWidget()
+        
+        # 创建各步骤页面
+        self.create_step1_page()  # 文件选择页面
+        self.create_step2_page()  # 布局设置页面
+        self.create_step3_page()  # 预览页面
+        self.create_step4_page()  # 导出页面
+        
+        main_layout.addWidget(self.stacked_widget)
+        
+        # 创建导航按钮
+        nav_layout = QHBoxLayout()
+        
+        # 占位空间
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        nav_layout.addWidget(spacer)
+        
+        # 上一步按钮
+        self.prev_btn = QPushButton("< 上一步")
+        self.prev_btn.clicked.connect(self.go_to_prev_step)
+        self.prev_btn.setEnabled(False)
+        nav_layout.addWidget(self.prev_btn)
+        
+        # 下一步按钮
+        self.next_btn = QPushButton("下一步 >")
+        self.next_btn.setObjectName("accentButton")
+        self.next_btn.clicked.connect(self.go_to_next_step)
+        self.next_btn.setEnabled(False)  # 初始状态禁用，等待选择文件
+        nav_layout.addWidget(self.next_btn)
+        
+        main_layout.addLayout(nav_layout)
+        
+        self.setCentralWidget(central_widget)
+    
+    def create_step1_page(self):
+        """创建步骤1：选择PPT文件页面"""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 20, 0, 0)
+        layout.setSpacing(20)
+        
+        # 创建文件选择区域
+        file_group = QGroupBox("选择PPT文件")
+        file_layout = QVBoxLayout(file_group)
+        
+        # 选择PPT按钮
+        file_btn_layout = QHBoxLayout()
+        file_btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.select_ppt_btn = QPushButton("选择PPT文件")
+        self.select_ppt_btn.setMinimumHeight(40)
+        self.select_ppt_btn.clicked.connect(self.select_ppt_file)
+        file_btn_layout.addWidget(self.select_ppt_btn)
+        
+        file_layout.addLayout(file_btn_layout)
+        
+        # 显示当前文件信息
+        self.file_info = QLabel()
+        self.file_info.setObjectName("infoLabel")
+        self.file_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.file_info.setText("未选择任何文件")
+        file_layout.addWidget(self.file_info)
+        
+        layout.addWidget(file_group)
+        
+        # 文件预览区域
+        preview_group = QGroupBox("文件信息")
+        preview_layout = QVBoxLayout(preview_group)
+        
+        self.file_preview = QLabel()
+        self.file_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.file_preview.setText("选择PPT文件后将显示幻灯片数量及预览信息")
+        preview_layout.addWidget(self.file_preview)
+        
+        layout.addWidget(preview_group)
+        
+        # 添加到堆叠式部件
+        self.stacked_widget.addWidget(page)
+    
+    def create_step2_page(self):
+        """创建步骤2：布局设置页面"""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 20, 0, 0)
+        layout.setSpacing(20)
+        
+        # 页面方向选择
+        orientation_group = QGroupBox("页面方向")
+        orientation_layout = QHBoxLayout(orientation_group)
+        
+        self.orientation_group = QButtonGroup(self)
+        
+        self.landscape_radio = QRadioButton("横向A4 (297×210mm)")
+        self.portrait_radio = QRadioButton("纵向A4 (210×297mm)")
+        
+        # 默认选择横向
+        self.landscape_radio.setChecked(self.layout_config["is_landscape"])
+        self.portrait_radio.setChecked(not self.layout_config["is_landscape"])
+        
+        self.orientation_group.addButton(self.landscape_radio)
+        self.orientation_group.addButton(self.portrait_radio)
+        
+        self.landscape_radio.clicked.connect(self.update_orientation)
+        self.portrait_radio.clicked.connect(self.update_orientation)
+        
+        # 添加图标或预览图
+        landscape_layout = QVBoxLayout()
+        landscape_layout.addWidget(self.landscape_radio)
+        
+        portrait_layout = QVBoxLayout()
+        portrait_layout.addWidget(self.portrait_radio)
+        
+        orientation_layout.addLayout(landscape_layout)
+        orientation_layout.addSpacing(20)
+        orientation_layout.addLayout(portrait_layout)
+        
+        layout.addWidget(orientation_group)
+        
+        # 布局设置区域
+        settings_group = QGroupBox("布局设置")
+        settings_layout = QGridLayout(settings_group)
+        settings_layout.setColumnStretch(1, 1)
+        settings_layout.setColumnStretch(3, 1)
+        
+        # 每行数量设置
+        settings_layout.addWidget(QLabel("每行PPT数量:"), 0, 0)
+        
+        self.columns_spin = QSpinBox()
+        self.columns_spin.setRange(1, 10)
+        self.columns_spin.setValue(self.layout_config["columns"])
+        self.columns_spin.valueChanged.connect(self.update_layout)
+        settings_layout.addWidget(self.columns_spin, 0, 1)
+        
+        # 水平间距设置
+        settings_layout.addWidget(QLabel("水平间距 (mm):"), 0, 2)
+        
+        self.h_spacing_spin = QDoubleSpinBox()
+        self.h_spacing_spin.setRange(0, 50)
+        self.h_spacing_spin.setValue(self.layout_config["h_spacing"])
+        self.h_spacing_spin.setSingleStep(0.5)
+        self.h_spacing_spin.valueChanged.connect(self.update_spacing)
+        settings_layout.addWidget(self.h_spacing_spin, 0, 3)
+        
+        # 垂直间距设置
+        settings_layout.addWidget(QLabel("垂直间距 (mm):"), 1, 0)
+        
+        self.v_spacing_spin = QDoubleSpinBox()
+        self.v_spacing_spin.setRange(0, 50)
+        self.v_spacing_spin.setValue(self.layout_config["v_spacing"])
+        self.v_spacing_spin.setSingleStep(0.5)
+        self.v_spacing_spin.valueChanged.connect(self.update_spacing)
+        settings_layout.addWidget(self.v_spacing_spin, 1, 1)
+        
+        # 页边距设置
+        settings_layout.addWidget(QLabel("页面左边距 (mm):"), 2, 0)
+        
+        self.margin_left_spin = QDoubleSpinBox()
+        self.margin_left_spin.setRange(0, 50)
+        self.margin_left_spin.setValue(self.layout_config["margin_left"])
+        self.margin_left_spin.setSingleStep(0.5)
+        self.margin_left_spin.valueChanged.connect(self.update_margins)
+        settings_layout.addWidget(self.margin_left_spin, 2, 1)
+        
+        settings_layout.addWidget(QLabel("页面右边距 (mm):"), 2, 2)
+        
+        self.margin_right_spin = QDoubleSpinBox()
+        self.margin_right_spin.setRange(0, 50)
+        self.margin_right_spin.setValue(self.layout_config["margin_right"])
+        self.margin_right_spin.setSingleStep(0.5)
+        self.margin_right_spin.valueChanged.connect(self.update_margins)
+        settings_layout.addWidget(self.margin_right_spin, 2, 3)
+        
+        settings_layout.addWidget(QLabel("页面上边距 (mm):"), 3, 0)
+        
+        self.margin_top_spin = QDoubleSpinBox()
+        self.margin_top_spin.setRange(0, 50)
+        self.margin_top_spin.setValue(self.layout_config["margin_top"])
+        self.margin_top_spin.setSingleStep(0.5)
+        self.margin_top_spin.valueChanged.connect(self.update_margins)
+        settings_layout.addWidget(self.margin_top_spin, 3, 1)
+        
+        settings_layout.addWidget(QLabel("页面下边距 (mm):"), 3, 2)
+        
+        self.margin_bottom_spin = QDoubleSpinBox()
+        self.margin_bottom_spin.setRange(0, 50)
+        self.margin_bottom_spin.setValue(self.layout_config["margin_bottom"])
+        self.margin_bottom_spin.setSingleStep(0.5)
+        self.margin_bottom_spin.valueChanged.connect(self.update_margins)
+        settings_layout.addWidget(self.margin_bottom_spin, 3, 3)
+        
+        layout.addWidget(settings_group)
+        
+        # 提示信息
+        hint_label = QLabel("设置好布局参数后，点击「下一步」查看预览效果")
+        hint_label.setObjectName("infoLabel")
+        hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(hint_label)
+        
+        # 添加到堆叠式部件
+        self.stacked_widget.addWidget(page)
+    
+    def create_step3_page(self):
+        """创建步骤3：预览页面"""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 20, 0, 0)
+        layout.setSpacing(20)
+        
+        # 预览信息区域
+        info_group = QGroupBox("布局信息")
+        info_layout = QVBoxLayout(info_group)
+        
+        self.preview_info = QLabel("计算中...")
+        self.preview_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        info_layout.addWidget(self.preview_info)
+        
+        # 预览刷新按钮
+        refresh_layout = QHBoxLayout()
+        refresh_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+        
+        self.refresh_preview_btn = QPushButton("刷新预览")
+        self.refresh_preview_btn.clicked.connect(self.refresh_preview)
+        refresh_layout.addWidget(self.refresh_preview_btn)
+        
+        info_layout.addLayout(refresh_layout)
+        
+        layout.addWidget(info_group)
+        
+        # 预览区域
+        preview_group = QGroupBox("布局预览")
+        preview_layout = QVBoxLayout(preview_group)
+        
+        # 创建滚动区域
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        self.preview_widget = QWidget()
+        self.preview_layout = QVBoxLayout(self.preview_widget)
+        self.preview_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        scroll_area.setWidget(self.preview_widget)
+        
+        preview_layout.addWidget(scroll_area)
+        
+        layout.addWidget(preview_group)
+        
+        # 添加到堆叠式部件
+        self.stacked_widget.addWidget(page)
+    
+    def create_step4_page(self):
+        """创建步骤4：导出页面"""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 20, 0, 0)
+        layout.setSpacing(20)
+        
+        # 导出设置区域
+        export_group = QGroupBox("导出设置")
+        export_layout = QVBoxLayout(export_group)
+        
+        # 导出摘要信息
+        self.export_summary = QLabel("导出摘要信息")
+        self.export_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        export_layout.addWidget(self.export_summary)
+        
+        # 导出按钮
+        export_btn_layout = QHBoxLayout()
+        export_btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.export_btn = QPushButton("导出PDF")
+        self.export_btn.setObjectName("accentButton")
+        self.export_btn.setMinimumHeight(40)
+        self.export_btn.clicked.connect(self.process_ppt)
+        export_btn_layout.addWidget(self.export_btn)
+        
+        export_layout.addLayout(export_btn_layout)
+        
+        layout.addWidget(export_group)
+        
+        # 导出结果区域
+        result_group = QGroupBox("导出结果")
+        result_layout = QVBoxLayout(result_group)
+        
+        self.export_result = QLabel("点击上方按钮开始导出")
+        self.export_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        result_layout.addWidget(self.export_result)
+        
+        layout.addWidget(result_group)
+        
+        # 添加到堆叠式部件
+        self.stacked_widget.addWidget(page)
+    
+    def show_welcome_screen(self):
+        """显示欢迎界面"""
+        # 设置初始步骤
+        self.step_indicator.set_current_step(0)
+        self.stacked_widget.setCurrentIndex(0)
+        
+        # 显示欢迎信息
+        self.file_preview.setText(WELCOME_TEXT)
+    
+    def go_to_next_step(self):
+        """前往下一步"""
+        current_index = self.stacked_widget.currentIndex()
+        
+        # 验证当前步骤
+        if current_index == 0 and not self.slide_images:
+            QMessageBox.warning(self, "警告", "请先选择PPT文件！")
+            return
+        elif current_index == 2:
+            # 如果从预览到导出，更新导出摘要信息
+            layout_result = self.layout_calculator.calculate_layout(
+                self.slide_images, self.layout_config
+            )
+            
+            orientation_text = "横向" if self.layout_config["is_landscape"] else "纵向"
+            summary = f"<p>将导出 <b>{len(self.slide_images)}</b> 张PPT幻灯片</p>"
+            summary += f"<p>页面方向: <b>{orientation_text}A4</b></p>"
+            summary += f"<p>布局: 每页 <b>{layout_result['rows']}</b> 行 × <b>{layout_result['columns']}</b> 列</p>"
+            summary += f"<p>预计页数: <b>{layout_result['pages_needed']}</b> 页PDF</p>"
+            summary += "<p>点击「导出PDF」按钮选择保存位置并开始导出</p>"
+            
+            self.export_summary.setText(summary)
+            
+        # 前往下一步
+        if current_index < self.stacked_widget.count() - 1:
+            self.stacked_widget.setCurrentIndex(current_index + 1)
+            self.step_indicator.set_current_step(current_index + 1)
+            
+            # 如果是前往预览页面，立即刷新预览
+            if current_index == 1:
+                self.refresh_preview()
+            
+            # 更新按钮状态
+            self.prev_btn.setEnabled(True)
+            self.next_btn.setEnabled(current_index < self.stacked_widget.count() - 2)
+    
+    def go_to_prev_step(self):
+        """返回上一步"""
+        current_index = self.stacked_widget.currentIndex()
+        
+        if current_index > 0:
+            self.stacked_widget.setCurrentIndex(current_index - 1)
+            self.step_indicator.set_current_step(current_index - 1)
+            
+            # 更新按钮状态
+            self.next_btn.setEnabled(True)
+            self.prev_btn.setEnabled(current_index > 1)
+    
+    def select_ppt_file(self):
+        """选择PPT文件"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择PPT文件", "", "PowerPoint文件 (*.pptx *.ppt)"
+        )
+        
+        if file_path:
+            self.current_ppt_path = file_path
+            self.file_info.setText(f"已选择: {os.path.basename(file_path)}")
+            
+            # 更新状态栏
+            self.status_bar.showMessage(f"正在处理文件: {os.path.basename(file_path)}...")
+            
+            # 关闭之前的图像以释放资源
+            if self.slide_images:
+                for img in self.slide_images:
+                    try:
+                        if hasattr(img, 'close'):
+                            img.close()
+                    except:
+                        pass
+                self.slide_images = []
+                
+            # 转换PPT为图像
+            self.slide_images = self.ppt_processor.convert_ppt_to_images(file_path)
+            
+            # 显示文件预览信息
+            if self.slide_images:
+                info = f"<p>成功加载 <b>{len(self.slide_images)}</b> 张PPT幻灯片</p>"
+                info += "<p>点击「下一步」进行布局设置</p>"
+                self.file_preview.setText(info)
+                
+                # 启用下一步按钮
+                self.next_btn.setEnabled(True)
+                
+                # 更新状态栏
+                self.status_bar.showMessage(f"文件已加载: {os.path.basename(file_path)}")
+            else:
+                self.file_preview.setText("<p style='color:red;'>文件处理失败，请选择有效的PPT文件</p>")
+                self.next_btn.setEnabled(False)
+                self.status_bar.showMessage("文件处理失败")
+    
+    def update_orientation(self):
+        """更新页面方向设置"""
+        is_landscape = self.landscape_radio.isChecked()
+        if is_landscape != self.layout_config["is_landscape"]:
+            self.layout_config["is_landscape"] = is_landscape
+            orientation_text = "横向" if is_landscape else "纵向"
+            self.status_bar.showMessage(f"页面方向已更改为{orientation_text}A4")
+    
+    def update_layout(self):
+        """更新布局设置"""
+        self.layout_config["columns"] = self.columns_spin.value()
+        self.status_bar.showMessage(f"布局更新: 每行 {self.layout_config['columns']} 个PPT")
+    
+    def update_spacing(self):
+        """更新间距设置"""
+        self.layout_config["h_spacing"] = self.h_spacing_spin.value()
+        self.layout_config["v_spacing"] = self.v_spacing_spin.value()
+    
+    def update_margins(self):
+        """更新页边距设置"""
+        self.layout_config["margin_left"] = self.margin_left_spin.value()
+        self.layout_config["margin_right"] = self.margin_right_spin.value()
+        self.layout_config["margin_top"] = self.margin_top_spin.value()
+        self.layout_config["margin_bottom"] = self.margin_bottom_spin.value()
+    
+    def refresh_preview(self):
+        """刷新预览"""
+        if not self.slide_images:
+            return
+        
+        # 更新状态栏
+        self.status_bar.showMessage("正在生成预览...")
+        
+        # 清除当前预览
+        for i in reversed(range(self.preview_layout.count())):
+            item = self.preview_layout.itemAt(i)
+            if item.widget():
+                item.widget().deleteLater()
+            self.preview_layout.removeItem(item)
+        
+        # 计算布局
+        layout_result = self.layout_calculator.calculate_layout(
+            self.slide_images, self.layout_config
+        )
+        
+        # 显示计算结果
+        orientation_text = "横向" if self.layout_config["is_landscape"] else "纵向"
+        result_text = f"<p>页面方向: <b>{orientation_text}A4</b></p>"
+        result_text += f"<p>布局结果: 每页 <b>{layout_result['rows']}</b> 行 × <b>{layout_result['columns']}</b> 列</p>"
+        result_text += f"<p>每个PPT尺寸: <b>{layout_result['item_width']:.1f}</b> × <b>{layout_result['item_height']:.1f}</b> mm</p>"
+        result_text += f"<p>预计页数: <b>{layout_result['pages_needed']}</b> 页</p>"
+        self.preview_info.setText(result_text)
+        
+        # 创建预览
+        preview_label = QLabel()
+        preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # 根据方向设置画布大小
+        if self.layout_config["is_landscape"]:
+            pixmap = QPixmap(900, 650)  # 横向A4比例
+        else:
+            pixmap = QPixmap(650, 900)  # 纵向A4比例
+            
+        pixmap.fill(QColor(COLORS['surface']))
+        
+        painter = QPainter(pixmap)
+        
+        # 计算缩放因子，使A4页面适合画布大小
+        if self.layout_config["is_landscape"]:
+            scale_factor = pixmap.width() / 297  # A4横向宽度为297mm
+        else:
+            scale_factor = pixmap.width() / 210  # A4纵向宽度为210mm
+        
+        # 设置画笔
+        pen = QPen(QColor(COLORS['divider']))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        
+        # 根据方向获取页面尺寸
+        page_width = 297 if self.layout_config["is_landscape"] else 210
+        page_height = 210 if self.layout_config["is_landscape"] else 297
+        
+        # 绘制A4页面边框
+        page_width_px = int(page_width * scale_factor)
+        page_height_px = int(page_height * scale_factor)
+        painter.fillRect(0, 0, page_width_px, page_height_px, QColor(COLORS['surface']))
+        painter.setPen(QPen(QColor(COLORS['primary']), 2))
+        painter.drawRect(0, 0, page_width_px, page_height_px)
+        
+        # 绘制PPT预览
+        left_margin = self.layout_config["margin_left"] * scale_factor
+        top_margin = self.layout_config["margin_top"] * scale_factor
+        item_width = layout_result["item_width"] * scale_factor
+        item_height = layout_result["item_height"] * scale_factor
+        h_spacing = self.layout_config["h_spacing"] * scale_factor
+        v_spacing = self.layout_config["v_spacing"] * scale_factor
+        
+        # 设置字体
+        font = QFont("Arial", 9)
+        painter.setFont(font)
+        
+        # 示例模拟几个PPT位置
+        for row in range(layout_result["rows"]):
+            for col in range(layout_result["columns"]):
+                x = left_margin + col * (item_width + h_spacing)
+                y = top_margin + row * (item_height + v_spacing)
+                
+                # 绘制PPT边框
+                painter.setPen(QPen(QColor(COLORS['primary_dark']), 1))
+                painter.fillRect(int(x), int(y), int(item_width), int(item_height), QColor(COLORS['background']))
+                painter.drawRect(int(x), int(y), int(item_width), int(item_height))
+                
+                # 绘制编号
+                painter.setPen(QColor(COLORS['text_primary']))
+                item_num = row * layout_result["columns"] + col + 1
+                if item_num <= len(self.slide_images):
+                    painter.drawText(
+                        QRectF(int(x), int(y), int(item_width), int(item_height)),
+                        Qt.AlignmentFlag.AlignCenter,
+                        f"PPT {item_num}"
+                    )
+        
+        painter.end()
+        
+        # 显示预览图
+        preview_label.setPixmap(pixmap)
+        self.preview_layout.addWidget(preview_label)
+        
+        # 更新状态栏
+        self.status_bar.showMessage("预览已生成")
+        
+        # 启用下一步按钮
+        self.next_btn.setEnabled(True)
+    
+    def process_ppt(self):
+        """处理PPT并导出PDF"""
+        if not self.slide_images:
+            return
+        
+        # 选择输出文件
+        output_path, _ = QFileDialog.getSaveFileName(
+            self, "保存PDF文件", "", "PDF文件 (*.pdf)"
+        )
+        
+        if not output_path:
+            return
+        
+        # 更新状态栏和结果显示
+        self.status_bar.showMessage("正在生成PDF...")
+        self.export_result.setText("<p>正在处理，请稍候...</p>")
+        self.export_btn.setEnabled(False)
+        
+        # 使用当前布局设置处理PPT并生成PDF
+        layout_result = self.layout_calculator.calculate_layout(
+            self.slide_images, self.layout_config
+        )
+        
+        success = self.ppt_processor.generate_pdf(
+            self.slide_images, 
+            output_path,
+            layout_result, 
+            self.layout_config
+        )
+        
+        if success:
+            self.export_result.setText(f"<p style='color:{COLORS['success']};'><b>PDF导出成功!</b></p><p>文件保存在: {output_path}</p>")
+            self.status_bar.showMessage(f"PDF已成功导出: {os.path.basename(output_path)}")
+            
+            # 弹出成功提示
+            QMessageBox.information(self, "导出成功", f"PDF已成功保存到:\n{output_path}")
+        else:
+            self.export_result.setText(f"<p style='color:{COLORS['error']};'><b>导出失败!</b></p><p>请检查文件权限和磁盘空间</p>")
+            self.status_bar.showMessage("PDF导出失败")
+            
+            # 弹出错误提示
+            QMessageBox.critical(self, "导出失败", "生成PDF时出错，请检查文件权限和磁盘空间")
+        
+        # 清理临时文件
+        self.ppt_processor.cleanup_temp_files()
+        
+        self.export_btn.setEnabled(True)
+    
+    def closeEvent(self, event):
+        """程序关闭时清理临时文件"""
+        try:
+            # 清理PPT处理器的临时文件
+            if hasattr(self, 'ppt_processor') and self.ppt_processor:
+                self.ppt_processor.cleanup_temp_files()
+                self.status_bar.showMessage("已清理所有临时文件")
+            
+            # 关闭所有可能仍然打开的图像
+            if hasattr(self, 'slide_images') and self.slide_images:
+                for img in self.slide_images:
+                    try:
+                        if hasattr(img, 'close'):
+                            img.close()
+                    except:
+                        pass
+            
+            # 继续正常关闭
+            event.accept()
+        except Exception as e:
+            print(f"关闭时发生错误: {e}")
+            event.accept() 
