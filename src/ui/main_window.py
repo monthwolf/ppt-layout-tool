@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                            QStatusBar, QToolButton, QTabWidget, QWizard, 
                            QWizardPage, QStackedWidget, QRadioButton, QButtonGroup,
                            QCheckBox, QTextEdit, QApplication)
-from PyQt6.QtCore import Qt, QRectF, QSize
+from PyQt6.QtCore import Qt, QRectF, QSize, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon, QMovie, QPainterPath
 
 import os
@@ -16,6 +16,85 @@ import io
 from src.utils.ppt_processor import PPTProcessor
 from src.utils.layout_calculator import LayoutCalculator
 from src.ui.styles import STYLESHEET, COLORS, WELCOME_TEXT, STEPS_GUIDE
+
+class LoadingOverlay(QWidget):
+    """一个现代化的加载覆盖层，提供视觉反馈"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setVisible(False)
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # 加载动画容器
+        self.container = QFrame()
+        self.container.setObjectName("loadingContainer")
+        self.container.setStyleSheet(f"""
+            #loadingContainer {{
+                background-color: rgba(0, 0, 0, 0.8);
+                border-radius: 15px;
+                padding: 30px;
+                color: white;
+            }}
+        """)
+        container_layout = QVBoxLayout(self.container)
+        container_layout.setSpacing(20)
+
+        # GIF动画
+        self.loading_animation = QLabel()
+        loading_gif_path = os.path.join("resources", "loading.gif")
+        if os.path.exists(loading_gif_path):
+            self.movie = QMovie(loading_gif_path)
+            self.movie.setScaledSize(QSize(64, 64))
+            self.loading_animation.setMovie(self.movie)
+        else:
+            self.loading_animation.setText("B") # Fallback
+        container_layout.addWidget(self.loading_animation, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # 加载文本
+        self.loading_text = QLabel("正在处理...")
+        self.loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.loading_text.setStyleSheet("font-size: 16px; font-weight: bold;")
+        container_layout.addWidget(self.loading_text)
+        
+        layout.addWidget(self.container)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if hasattr(self, 'movie'):
+            self.movie.start()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if hasattr(self, 'movie'):
+            self.movie.stop()
+
+    def set_text(self, text):
+        self.loading_text.setText(text)
+
+    def show(self):
+        if self.parentWidget():
+            self.resize(self.parentWidget().size())
+        super().show()
+
+class Worker(QThread):
+    """通用工作线程，用于执行耗时操作"""
+    finished = pyqtSignal(object)
+    error = pyqtSignal(Exception)
+
+    def __init__(self, function, *args, **kwargs):
+        super().__init__()
+        self.function = function
+        self.args = args
+        self.kwargs = kwargs
+
+    def run(self):
+        try:
+            result = self.function(*self.args, **self.kwargs)
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(e)
 
 class StepIndicator(QFrame):
     """步骤指示器组件"""
@@ -159,6 +238,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(STYLESHEET)
         
         self.init_ui()
+        self.init_loading_overlay()
         
         # 显示欢迎界面
         self.show_welcome_screen()
@@ -167,6 +247,16 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("准备就绪")
+    
+    def init_loading_overlay(self):
+        """初始化加载覆盖层"""
+        self.loading_overlay = LoadingOverlay(self)
+    
+    def resizeEvent(self, event):
+        """确保覆盖层始终与主窗口大小一致"""
+        super().resizeEvent(event)
+        if hasattr(self, 'loading_overlay'):
+            self.loading_overlay.resize(event.size())
     
     def init_ui(self):
         """初始化UI界面"""
@@ -606,7 +696,7 @@ class MainWindow(QMainWindow):
             self.prev_btn.setEnabled(current_index > 1)
     
     def select_ppt_file(self):
-        """选择PPT文件"""
+        """选择PPT文件并使用工作线程进行处理"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择PPT文件", "", "PowerPoint文件 (*.pptx *.ppt)"
         )
@@ -615,9 +705,9 @@ class MainWindow(QMainWindow):
             self.current_ppt_path = file_path
             self.file_info.setText(f"已选择: {os.path.basename(file_path)}")
             
-            # 更新状态栏
-            self.status_bar.showMessage(f"正在处理文件: {os.path.basename(file_path)}...")
-            
+            self.loading_overlay.set_text("正在转换PPT文件...")
+            self.loading_overlay.show()
+
             # 关闭之前的图像以释放资源
             if self.slide_images:
                 for img in self.slide_images:
@@ -627,26 +717,42 @@ class MainWindow(QMainWindow):
                     except:
                         pass
                 self.slide_images = []
-                
-            # 转换PPT为图像
-            self.slide_images = self.ppt_processor.convert_ppt_to_images(file_path)
-            
-            # 显示文件预览信息
-            if self.slide_images:
-                info = f"<p>成功加载 <b>{len(self.slide_images)}</b> 张PPT幻灯片</p>"
-                info += "<p>点击「下一步」进行布局设置</p>"
-                self.file_preview.setText(info)
-                
-                # 启用下一步按钮
-                self.next_btn.setEnabled(True)
-                
-                # 更新状态栏
-                self.status_bar.showMessage(f"文件已加载: {os.path.basename(file_path)}")
-            else:
-                self.file_preview.setText("<p style='color:red;'>文件处理失败，请选择有效的PPT文件</p>")
-                self.next_btn.setEnabled(False)
-                self.status_bar.showMessage("文件处理失败")
-    
+
+            # 在工作线程中转换PPT
+            self.worker = Worker(self.ppt_processor.convert_ppt_to_images, file_path)
+            self.worker.finished.connect(self._on_ppt_conversion_finished)
+            self.worker.error.connect(self._on_task_error)
+            self.worker.start()
+
+    def _on_ppt_conversion_finished(self, slide_images):
+        """PPT转换完成后的回调"""
+        self.loading_overlay.hide()
+        self.slide_images = slide_images
+        
+        if self.slide_images:
+            info = f"<p>成功加载 <b>{len(self.slide_images)}</b> 张PPT幻灯片</p>"
+            info += "<p>点击「下一步」进行布局设置</p>"
+            self.file_preview.setText(info)
+            self.next_btn.setEnabled(True)
+            if self.current_ppt_path:
+                self.status_bar.showMessage(f"文件已加载: {os.path.basename(self.current_ppt_path)}")
+        else:
+            self.file_preview.setText(f"<p style='color:{COLORS['error']};'>文件处理失败</p><p>请选择有效的PPT文件或检查依赖项</p>")
+            self.next_btn.setEnabled(False)
+            self.status_bar.showMessage("文件处理失败")
+
+    def _on_task_error(self, exception):
+        """处理工作线程中的错误"""
+        self.loading_overlay.hide()
+        error_message = f"发生了一个错误: \n{str(exception)}"
+        QMessageBox.critical(self, "操作失败", error_message)
+        print(f"工作线程错误: {exception}")
+        
+        # 重置可能被禁用的按钮
+        self.export_btn.setEnabled(True)
+        self.final_export_btn.setEnabled(True)
+        self.status_bar.showMessage("操作失败", 5000)
+
     def update_orientation(self):
         """更新页面方向设置"""
         is_landscape = self.landscape_radio.isChecked()
@@ -835,57 +941,48 @@ class MainWindow(QMainWindow):
         self.next_btn.setEnabled(True)
     
     def process_ppt(self):
-        """处理PPT并导出PDF"""
+        """处理PPT并导出PDF（异步）"""
         if not self.slide_images:
             return
         
-        # 选择输出文件
-        output_path, _ = QFileDialog.getSaveFileName(
-            self, "保存PDF文件", "", "PDF文件 (*.pdf)"
-        )
-        
+        output_path, _ = QFileDialog.getSaveFileName(self, "保存PDF文件", "", "PDF文件 (*.pdf)")
         if not output_path:
             return
+
+        self.content_pdf_path = output_path
         
-        self.content_pdf_path = output_path  # 保存内容PDF的路径
-        
-        # 更新状态栏和结果显示
-        self.status_bar.showMessage("正在生成PDF...")
-        self.export_result.setText("<p>正在处理，请稍候...</p>")
+        self.loading_overlay.set_text("正在生成内容PDF...")
+        self.loading_overlay.show()
         self.export_btn.setEnabled(False)
+
+        layout_result = self.layout_calculator.calculate_layout(self.slide_images, self.layout_config)
         
-        # 使用当前布局设置处理PPT并生成PDF
-        layout_result = self.layout_calculator.calculate_layout(
-            self.slide_images, self.layout_config
-        )
-        
-        success = self.ppt_processor.generate_pdf(
+        self.worker = Worker(
+            self.ppt_processor.generate_pdf, 
             self.slide_images, 
-            output_path,
+            self.content_pdf_path,
             layout_result, 
             self.layout_config
         )
-        
+        self.worker.finished.connect(self._on_content_pdf_generated)
+        self.worker.error.connect(self._on_task_error)
+        self.worker.start()
+
+    def _on_content_pdf_generated(self, success):
+        """内容PDF生成完成后的回调"""
+        self.loading_overlay.hide()
+        self.export_btn.setEnabled(True)
+
         if success:
-            self.export_result.setText(f"<p style='color:{COLORS['success']};'><b>PDF导出成功!</b></p><p>文件保存在: {output_path}</p>")
-            self.status_bar.showMessage(f"PDF已成功导出: {os.path.basename(output_path)}")
-            
-            # 弹出成功提示
-            QMessageBox.information(self, "导出成功", f"PDF已成功保存到:\n{output_path}")
-            # 显示进入AI索引步骤的按钮
+            self.export_result.setText(f"<p style='color:{COLORS['success']};'><b>PDF导出成功!</b></p><p>文件保存在: {self.content_pdf_path}</p>")
+            self.status_bar.showMessage(f"PDF已成功导出: {os.path.basename(self.content_pdf_path)}")
+            QMessageBox.information(self, "导出成功", f"PDF已成功保存到:\n{self.content_pdf_path}")
             self.ai_index_button.setVisible(True)
         else:
             self.export_result.setText(f"<p style='color:{COLORS['error']};'><b>导出失败!</b></p><p>请检查文件权限和磁盘空间</p>")
             self.status_bar.showMessage("PDF导出失败")
-            
-            # 弹出错误提示
-            QMessageBox.critical(self, "导出失败", "生成PDF时出错，请检查文件权限和磁盘空间")
-        
-        # 清理临时文件
-        self.ppt_processor.cleanup_temp_files()
-        
-        self.export_btn.setEnabled(True)
-    
+            QMessageBox.critical(self, "导出失败", "生成PDF时出错，请检查日志。")
+
     def go_to_ai_step(self):
         """跳转到AI索引步骤"""
         self.step_indicator.set_current_step(4)
@@ -936,7 +1033,7 @@ class MainWindow(QMainWindow):
         self.ai_prompt_text.setText(prompt.strip())
     
     def generate_final_pdf_with_index(self):
-        """生成包含AI索引的最终PDF"""
+        """生成包含AI索引的最终PDF（异步）"""
         markdown_text = self.ai_markdown_input.toPlainText()
         if not markdown_text.strip():
             QMessageBox.warning(self, "警告", "请输入AI生成的Markdown索引内容。")
@@ -946,39 +1043,37 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", "未找到已导出的内容PDF，请先完成第四步。")
             return
             
-        self.final_export_result.setText("正在生成索引并合并PDF...")
-        self.final_export_btn.setEnabled(False)
-
-        # 让用户选择最终保存位置
         final_output_path, _ = QFileDialog.getSaveFileName(
             self, "保存带索引的PDF文件", os.path.dirname(self.content_pdf_path), "PDF文件 (*.pdf)"
         )
-
         if not final_output_path:
-            self.final_export_btn.setEnabled(True)
-            self.final_export_result.setText("")
             return
         
-        # 调用处理器完成工作
-        try:
-            success = self.ppt_processor.generate_pdf_with_index(
-                markdown_text,
-                self.content_pdf_path,
-                final_output_path
-            )
-
-            if success:
-                self.final_export_result.setText(f"<p style='color:{COLORS['success']};'><b>带索引的PDF导出成功!</b></p><p>文件保存在: {final_output_path}</p>")
-                QMessageBox.information(self, "成功", f"带索引的最终PDF已保存到:\n{final_output_path}")
-            else:
-                raise Exception("合并PDF失败")
-
-        except Exception as e:
-            self.final_export_result.setText(f"<p style='color:{COLORS['error']};'><b>最终PDF生成失败!</b></p><p>错误: {e}</p>")
-            QMessageBox.critical(self, "失败", f"生成最终PDF时出错: {e}")
+        self.loading_overlay.set_text("正在生成索引并合并PDF...")
+        self.loading_overlay.show()
+        self.final_export_btn.setEnabled(False)
         
-        finally:
-            self.final_export_btn.setEnabled(True)
+        self.worker = Worker(
+            self.ppt_processor.generate_pdf_with_index,
+            markdown_text,
+            self.content_pdf_path,
+            final_output_path
+        )
+        self.worker.finished.connect(lambda success: self._on_final_pdf_generated(success, final_output_path))
+        self.worker.error.connect(self._on_task_error)
+        self.worker.start()
+
+    def _on_final_pdf_generated(self, success, final_output_path):
+        """最终PDF生成完成后的回调"""
+        self.loading_overlay.hide()
+        self.final_export_btn.setEnabled(True)
+
+        if success:
+            self.final_export_result.setText(f"<p style='color:{COLORS['success']};'><b>带索引的PDF导出成功!</b></p><p>文件保存在: {final_output_path}</p>")
+            QMessageBox.information(self, "成功", f"带索引的最终PDF已保存到:\n{final_output_path}")
+        else:
+            self.final_export_result.setText(f"<p style='color:{COLORS['error']};'><b>最终PDF生成失败!</b></p><p>请检查日志获取详细信息。</p>")
+            QMessageBox.critical(self, "失败", "生成最终PDF时出错，请检查日志。")
     
     def closeEvent(self, event):
         """程序关闭时清理临时文件"""

@@ -391,7 +391,7 @@ class PPTProcessor:
                     # 计算页码位置在右下角
                     page_number_x = page_width_mm * mm - margin_right_mm * mm - 15
                     page_number_y = margin_bottom_mm * mm 
-                    c.drawString(page_number_x, page_number_y, f"第 {page_idx+1} 页 / 共 {(slide_count + items_per_page - 1) // items_per_page} 页")
+                    c.drawString(page_number_x, page_number_y, f"{page_idx+1}")
             
             # 保存PDF
             c.save()
