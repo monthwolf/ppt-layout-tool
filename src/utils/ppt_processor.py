@@ -466,10 +466,15 @@ class PPTProcessor:
         styles = getSampleStyleSheet()
         
         # 自定义样式
-        styles.add(ParagraphStyle(name='H1', fontSize=18, leading=22, spaceAfter=10, fontName='Helvetica-Bold'))
-        styles.add(ParagraphStyle(name='H2', fontSize=14, leading=18, spaceAfter=8, fontName='Helvetica-Bold'))
-        styles.add(ParagraphStyle(name='H3', fontSize=12, leading=16, spaceAfter=6, fontName='Helvetica-Bold'))
-        styles.add(ParagraphStyle(name='Bullet', leftIndent=20, firstLineIndent=0, spaceAfter=4, leading=14))
+        # 检查并添加自定义样式，避免与默认样式冲突
+        if 'H1' not in styles:
+            styles.add(ParagraphStyle(name='H1', fontSize=18, leading=22, spaceAfter=10, fontName='Helvetica-Bold'))
+        if 'H2' not in styles:
+            styles.add(ParagraphStyle(name='H2', fontSize=14, leading=18, spaceAfter=8, fontName='Helvetica-Bold'))
+        if 'H3' not in styles:
+            styles.add(ParagraphStyle(name='H3', fontSize=12, leading=16, spaceAfter=6, fontName='Helvetica-Bold'))
+        if 'CustomBullet' not in styles:
+            styles.add(ParagraphStyle(name='CustomBullet', leftIndent=20, firstLineIndent=0, spaceAfter=4, leading=14))
         
         story = []
         lines = markdown_text.split('\n')
@@ -480,13 +485,13 @@ class PPTProcessor:
                 continue
 
             if line.startswith('###'):
-                story.append(Paragraph(line.replace('###', '').strip(), styles['H3']))
+                story.append(Paragraph(line.replace('###', '').strip(), styles.get('H3', styles['Normal'])))
             elif line.startswith('##'):
-                story.append(Paragraph(line.replace('##', '').strip(), styles['H2']))
+                story.append(Paragraph(line.replace('##', '').strip(), styles.get('H2', styles['Normal'])))
             elif line.startswith('#'):
-                story.append(Paragraph(line.replace('#', '').strip(), styles['H1']))
+                story.append(Paragraph(line.replace('#', '').strip(), styles.get('H1', styles['Normal'])))
             elif line.startswith(('-', '*')):
-                story.append(Paragraph(line[1:].strip(), styles['Bullet'], bulletText='•'))
+                story.append(Paragraph(line[1:].strip(), styles.get('CustomBullet', styles['Normal']), bulletText='•'))
             else:
                 story.append(Paragraph(line, styles['Normal']))
             

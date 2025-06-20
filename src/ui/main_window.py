@@ -5,99 +5,121 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                            QStatusBar, QToolButton, QTabWidget, QWizard, 
                            QWizardPage, QStackedWidget, QRadioButton, QButtonGroup,
                            QCheckBox, QTextEdit, QApplication)
-from PyQt6.QtCore import Qt, QRectF, QSize, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QRectF, QSize, QThread, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QByteArray, QRect
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon, QMovie, QPainterPath
+from PyQt6.QtSvg import QSvgRenderer
 
 import os
 from pptx import Presentation
 from PIL import Image
 import io
+from pathlib import Path
+import sys
 
 from src.utils.ppt_processor import PPTProcessor
 from src.utils.layout_calculator import LayoutCalculator
 from src.ui.styles import STYLESHEET, COLORS, WELCOME_TEXT, STEPS_GUIDE
+from src.ui.loading_overlay import LoadingOverlay
+from src.ui.worker import Worker
+from src.ui.spinner_widget import SpinnerWidget
 
-class LoadingOverlay(QWidget):
-    """一个现代化的加载覆盖层，提供视觉反馈"""
+def get_resource_path(relative_path):
+    """Constructs the absolute path for a resource."""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # For development, go up two directories from this file (src/ui -> ppt/)
+        base_path = Path(__file__).resolve().parents[2]
+    return str(base_path / relative_path)
+
+class AnimatedStackedWidget(QStackedWidget):
+    """一个支持平滑滑动动画的QStackedWidget"""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setVisible(False)
+        self.m_speed = 350
+        self.m_animation_type = QEasingCurve.Type.InOutCubic
+        self.m_now = 0
+        self.m_next = 0
+        self.m_active = False
 
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    def set_animation(self, animation_type):
+        self.m_animation_type = animation_type
 
-        # 加载动画容器
-        self.container = QFrame()
-        self.container.setObjectName("loadingContainer")
-        self.container.setStyleSheet(f"""
-            #loadingContainer {{
-                background-color: rgba(0, 0, 0, 0.8);
-                border-radius: 15px;
-                padding: 30px;
-                color: white;
-            }}
-        """)
-        container_layout = QVBoxLayout(self.container)
-        container_layout.setSpacing(20)
-
-        # GIF动画
-        self.loading_animation = QLabel()
-        loading_gif_path = os.path.join("resources", "loading.gif")
-        if os.path.exists(loading_gif_path):
-            self.movie = QMovie(loading_gif_path)
-            self.movie.setScaledSize(QSize(64, 64))
-            self.loading_animation.setMovie(self.movie)
-        else:
-            self.loading_animation.setText("B") # Fallback
-        container_layout.addWidget(self.loading_animation, 0, Qt.AlignmentFlag.AlignCenter)
-
-        # 加载文本
-        self.loading_text = QLabel("正在处理...")
-        self.loading_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.loading_text.setStyleSheet("font-size: 16px; font-weight: bold;")
-        container_layout.addWidget(self.loading_text)
+    def slide_in_next(self):
+        now_widget = self.widget(self.m_now)
+        next_widget = self.widget(self.m_next)
         
-        layout.addWidget(self.container)
+        anim_group = QParallelAnimationGroup(self)
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        if hasattr(self, 'movie'):
-            self.movie.start()
+        anim_now = QPropertyAnimation(now_widget, QByteArray(b"geometry"))
+        anim_now.setDuration(self.m_speed)
+        anim_now.setEasingCurve(self.m_animation_type)
+        anim_now.setStartValue(QRect(0, 0, self.width(), self.height()))
+        anim_now.setEndValue(QRect(-self.width(), 0, self.width(), self.height()))
+        anim_group.addAnimation(anim_now)
 
-    def hideEvent(self, event):
-        super().hideEvent(event)
-        if hasattr(self, 'movie'):
-            self.movie.stop()
+        anim_next = QPropertyAnimation(next_widget, QByteArray(b"geometry"))
+        anim_next.setDuration(self.m_speed)
+        anim_next.setEasingCurve(self.m_animation_type)
+        anim_next.setStartValue(QRect(self.width(), 0, self.width(), self.height()))
+        anim_next.setEndValue(QRect(0, 0, self.width(), self.height()))
+        anim_group.addAnimation(anim_next)
+        
+        anim_group.finished.connect(self.animation_done)
+        self.m_active = True
+        anim_group.start()
 
-    def set_text(self, text):
-        self.loading_text.setText(text)
+    def slide_in_prev(self):
+        now_widget = self.widget(self.m_now)
+        next_widget = self.widget(self.m_next)
 
-    def show(self):
-        if self.parentWidget():
-            self.resize(self.parentWidget().size())
-        super().show()
+        anim_group = QParallelAnimationGroup(self)
 
-class Worker(QThread):
-    """通用工作线程，用于执行耗时操作"""
-    finished = pyqtSignal(object)
-    error = pyqtSignal(Exception)
+        anim_now = QPropertyAnimation(now_widget, QByteArray(b"geometry"))
+        anim_now.setDuration(self.m_speed)
+        anim_now.setEasingCurve(self.m_animation_type)
+        anim_now.setStartValue(QRect(0, 0, self.width(), self.height()))
+        anim_now.setEndValue(QRect(self.width(), 0, self.width(), self.height()))
+        anim_group.addAnimation(anim_now)
 
-    def __init__(self, function, *args, **kwargs):
-        super().__init__()
-        self.function = function
-        self.args = args
-        self.kwargs = kwargs
+        anim_next = QPropertyAnimation(next_widget, QByteArray(b"geometry"))
+        anim_next.setDuration(self.m_speed)
+        anim_next.setEasingCurve(self.m_animation_type)
+        anim_next.setStartValue(QRect(-self.width(), 0, self.width(), self.height()))
+        anim_next.setEndValue(QRect(0, 0, self.width(), self.height()))
+        anim_group.addAnimation(anim_next)
 
-    def run(self):
-        try:
-            result = self.function(*self.args, **self.kwargs)
-            self.finished.emit(result)
-        except Exception as e:
-            self.error.emit(e)
+        anim_group.finished.connect(self.animation_done)
+        self.m_active = True
+        anim_group.start()
+
+    def setCurrentIndex(self, index):
+        if self.m_active or index == self.currentIndex():
+            return
+        
+        self.m_next = index
+        current_widget = self.widget(self.m_now)
+        next_widget = self.widget(self.m_next)
+        next_widget.setGeometry(0, 0, self.width(), self.height())
+
+        if index > self.m_now:
+            next_widget.move(self.width(), 0)
+            next_widget.show()
+            self.slide_in_next()
+        elif index < self.m_now:
+            next_widget.move(-self.width(), 0)
+            next_widget.show()
+            self.slide_in_prev()
+
+    def animation_done(self):
+        self.widget(self.m_now).hide()
+        self.setCurrentWidget(self.widget(self.m_next))
+        self.m_active = False
+        self.m_now = self.m_next
 
 class StepIndicator(QFrame):
-    """步骤指示器组件"""
+    """A modernized, animated step indicator"""
     def __init__(self, steps, parent=None):
         super().__init__(parent)
         self.steps = steps
@@ -109,26 +131,39 @@ class StepIndicator(QFrame):
         
         self.step_widgets = []
         for i, step_text in enumerate(steps):
-            # Step Container
             step_container = QWidget()
             step_layout = QVBoxLayout(step_container)
             step_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             step_layout.setContentsMargins(5, 0, 5, 0)
 
-            # Icon/Number Label
-            icon_label = QLabel()
-            icon_label.setFixedSize(32, 32)
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # This will hold either the number, the spinner, or the checkmark
+            self.icon_container = QStackedWidget()
+            self.icon_container.setFixedSize(32, 32)
             
-            # Text Label
+            # 0: Number Label
+            number_label = QLabel(str(i + 1))
+            number_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            number_label.setStyleSheet(f"background-color: {COLORS['divider']}; border-radius: 16px; color: {COLORS['text_secondary']}; font-weight: normal;")
+            self.icon_container.addWidget(number_label)
+
+            # 1: Spinner
+            spinner = SpinnerWidget()
+            self.icon_container.addWidget(spinner)
+
+            # 2: Checkmark
+            check_label = QLabel()
+            check_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            check_pixmap = self._create_check_pixmap()
+            check_label.setPixmap(check_pixmap)
+            self.icon_container.addWidget(check_label)
+            
             text_label = QLabel(step_text)
-            text_label.setObjectName(f"stepLabel{i}")
             
-            step_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
+            step_layout.addWidget(self.icon_container, 0, Qt.AlignmentFlag.AlignCenter)
             step_layout.addWidget(text_label, 0, Qt.AlignmentFlag.AlignCenter)
             
             layout.addWidget(step_container)
-            self.step_widgets.append({'container': step_container, 'icon': icon_label, 'text': text_label})
+            self.step_widgets.append({'icons': self.icon_container, 'text': text_label, 'spinner': spinner})
             
             if i < len(steps) - 1:
                 line = QFrame()
@@ -137,74 +172,48 @@ class StepIndicator(QFrame):
                 line.setStyleSheet(f"background-color: {COLORS['divider']};")
                 line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 layout.addWidget(line)
-                
-        # 准备加载动画
-        # 注意: 需要一个loading.gif文件放在resources目录下
-        loading_gif_path = os.path.join("resources", "loading.gif")
-        self.loading_movie = QMovie(loading_gif_path)
-        self.loading_movie.setScaledSize(QSize(28, 28))
+
+    def _create_check_pixmap(self):
+        pixmap = QPixmap(32, 32)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pixmap)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(QColor(COLORS['success']))
+        p.setPen(Qt.GlobalColor.transparent)
+        p.drawEllipse(0, 0, 32, 32)
+        
+        check_svg_path = get_resource_path("resources/check.svg")
+        renderer = QSvgRenderer(check_svg_path)
+        renderer.render(p, QRectF(6, 6, 20, 20))
+        p.end()
+        return pixmap
 
     def set_current_step(self, step):
         if 0 <= step < len(self.steps):
             self.current_step = step
             
             for i, widget_group in enumerate(self.step_widgets):
-                icon_label = widget_group['icon']
-                text_label = widget_group['text']
-                
-                # 停止之前的动画
-                if icon_label.movie():
-                    icon_label.movie().stop()
-                    icon_label.setMovie(None)
+                icons = widget_group['icons']
+                text = widget_group['text']
+                spinner = widget_group['spinner']
+
+                spinner.stop() # Stop all spinners first
 
                 if i < step:
-                    # 已完成步骤: 显示勾选图标
-                    pixmap = QPixmap(32, 32)
-                    pixmap.fill(Qt.GlobalColor.transparent)
-                    p = QPainter(pixmap)
-                    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    p.setBrush(QColor(COLORS['success']))
-                    p.setPen(Qt.GlobalColor.transparent)
-                    p.drawEllipse(0, 0, 32, 32)
-                    
-                    pen = QPen(QColor("white"), 2)
-                    p.setPen(pen)
-                    path = QPainterPath()
-                    path.moveTo(9, 16)
-                    path.lineTo(14, 21)
-                    path.lineTo(23, 12)
-                    p.drawPath(path)
-                    p.end()
-                    
-                    icon_label.setPixmap(pixmap)
-                    text_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: normal;")
+                    # Completed
+                    icons.setCurrentIndex(2)
+                    text.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: normal;")
                     
                 elif i == step:
-                    # 当前步骤: 显示加载动画
-                    if self.loading_movie.isValid():
-                        icon_label.setMovie(self.loading_movie)
-                        self.loading_movie.start()
-                    else:
-                        # Fallback to number if GIF not found
-                        icon_label.setText(str(i + 1))
-                        icon_label.setStyleSheet(f"""
-                            background-color: {COLORS['primary']};
-                            border-radius: 16px;
-                            color: white;
-                            font-weight: bold;
-                        """)
-                    text_label.setStyleSheet(f"color: {COLORS['primary']}; font-weight: bold;")
+                    # Current
+                    icons.setCurrentIndex(1)
+                    spinner.start()
+                    text.setStyleSheet(f"color: {COLORS['primary']}; font-weight: bold;")
                     
                 else:
-                    # 未完成步骤: 显示数字
-                    icon_label.setText(str(i + 1))
-                    icon_label.setStyleSheet(f"""
-                        background-color: {COLORS['divider']};
-                        border-radius: 16px;
-                        color: {COLORS['text_secondary']};
-                        font-weight: normal;
-                    """)
-                    text_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: normal;")
+                    # Pending
+                    icons.setCurrentIndex(0)
+                    text.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: normal;")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -270,7 +279,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.step_indicator)
         
         # 创建堆叠式部件用于不同步骤的界面
-        self.stacked_widget = QStackedWidget()
+        self.stacked_widget = AnimatedStackedWidget()
         
         # 创建各步骤页面
         self.create_step1_page()  # 文件选择页面

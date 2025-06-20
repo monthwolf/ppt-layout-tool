@@ -4,177 +4,158 @@
 
 # 应用程序的主题颜色
 COLORS = {
-    'primary': '#2979FF',    # 主题色，蓝色
-    'primary_light': '#75A7FF',
-    'primary_dark': '#004ECB',
-    'secondary': '#651FFF',  # 辅助色，紫色
-    'background': '#FAFAFA',
-    'surface': '#FFFFFF',
-    'error': '#B00020',
-    'success': '#4CAF50',
-    'text_primary': '#212121',
-    'text_secondary': '#757575',
-    'divider': '#E0E0E0',
+    "primary": "#4A90E2",         # Softer Blue
+    "primary_dark": "#357ABD",    # Darker shade for hover
+    "success": "#50E3C2",         # Mint Green
+    "error": "#E94E77",           # Soft Red
+    "background": "#FDFDFD",      # Off-white background
+    "surface": "#FFFFFF",         # Pure white for surfaces
+    "text_primary": "#333333",    # Dark Gray
+    "text_secondary": "#777777",  # Medium Gray
+    "divider": "#EAEAEA",         # Light Gray
 }
 
 # 应用程序样式表
 STYLESHEET = f"""
-/* 全局样式 */
-QWidget {{
-    font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
-    color: {COLORS['text_primary']};
-    background-color: {COLORS['background']};
-}}
+    QMainWindow, QWidget {{
+        background-color: {COLORS['background']};
+        color: {COLORS['text_primary']};
+        font-family: "Segoe UI", "Helvetica Neue", "Arial", sans-serif;
+    }}
+    
+    QGroupBox {{
+        background-color: {COLORS['surface']};
+        border: 1px solid {COLORS['divider']};
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: bold;
+        margin-top: 10px;
+        padding: 20px;
+    }}
+    
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        padding: 0 10px;
+        left: 10px;
+        color: {COLORS['primary']};
+    }}
 
-/* 主窗口 */
-QMainWindow {{
-    background-color: {COLORS['background']};
-}}
+    QPushButton {{
+        background-color: {COLORS['surface']};
+        border: 1px solid {COLORS['divider']};
+        border-radius: 5px;
+        padding: 10px 15px;
+        font-size: 13px;
+        color: {COLORS['text_primary']};
+        transition: all 0.3s ease;
+    }}
+    
+    QPushButton:hover {{
+        background-color: #F0F0F0;
+        border-color: #C0C0C0;
+    }}
+    
+    QPushButton:pressed {{
+        background-color: {COLORS['divider']};
+    }}
+    
+    QPushButton#accentButton {{
+        background-color: {COLORS['primary']};
+        color: white;
+        font-weight: bold;
+        border: none;
+    }}
+    
+    QPushButton#accentButton:hover {{
+        background-color: {COLORS['primary_dark']};
+    }}
 
-/* 按钮样式 */
-QPushButton {{
-    background-color: {COLORS['primary']};
-    color: white;
-    border: none;
-    border-radius: 4px;
-    padding: 8px 16px;
-    font-weight: 500;
-    min-width: 88px;
-}}
+    QLabel {{
+        font-size: 13px;
+        color: {COLORS['text_secondary']};
+    }}
 
-QPushButton:hover {{
-    background-color: {COLORS['primary_light']};
-}}
+    QLabel#infoLabel {{
+        color: {COLORS['text_secondary']};
+        font-style: italic;
+    }}
+    
+    QSpinBox, QDoubleSpinBox, QTextEdit {{
+        background-color: {COLORS['surface']};
+        border: 1px solid {COLORS['divider']};
+        border-radius: 5px;
+        padding: 8px;
+        font-size: 13px;
+    }}
 
-QPushButton:pressed {{
-    background-color: {COLORS['primary_dark']};
-}}
+    QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {{
+        border: 1px solid {COLORS['primary']};
+    }}
 
-QPushButton:disabled {{
-    background-color: #BDBDBD;
-    color: #757575;
-}}
+    QRadioButton::indicator {{
+        width: 16px;
+        height: 16px;
+    }}
 
-/* 强调按钮 */
-QPushButton#accentButton {{
-    background-color: {COLORS['secondary']};
-    font-weight: bold;
-}}
-
-QPushButton#accentButton:hover {{
-    background-color: #7C4DFF;
-}}
-
-/* 分组框 */
-QGroupBox {{
-    border: 1px solid {COLORS['divider']};
-    border-radius: 4px;
-    margin-top: 1.1em;
-    padding-top: 0.5em;
-    font-weight: 500;
-}}
-
-QGroupBox::title {{
-    subcontrol-origin: margin;
-    subcontrol-position: top center;
-    padding: 0 10px;
-    background-color: {COLORS['background']};
-}}
-
-/* 标签 */
-QLabel {{
-    color: {COLORS['text_primary']};
-}}
-
-QLabel#infoLabel {{
-    color: {COLORS['text_secondary']};
-    font-style: italic;
-}}
-
-QLabel#errorLabel {{
-    color: {COLORS['error']};
-}}
-
-QLabel#successLabel {{
-    color: {COLORS['success']};
-}}
-
-/* 输入框 */
-QLineEdit, QSpinBox, QDoubleSpinBox {{
-    border: 1px solid {COLORS['divider']};
-    border-radius: 4px;
-    padding: 4px;
-    background-color: {COLORS['surface']};
-}}
-
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
-    border: 2px solid {COLORS['primary']};
-}}
-
-/* 滚动区域 */
-QScrollArea {{
-    border: 1px solid {COLORS['divider']};
-    border-radius: 4px;
-    background-color: {COLORS['surface']};
-}}
-
-/* 工具提示 */
-QToolTip {{
-    background-color: #424242;
-    color: white;
-    border: none;
-    border-radius: 2px;
-    padding: 4px;
-}}
-
-/* 状态栏 */
-QStatusBar {{
-    background-color: {COLORS['surface']};
-    color: {COLORS['text_secondary']};
-}}
-
-/* 进度条 */
-QProgressBar {{
-    border: none;
-    border-radius: 4px;
-    background-color: {COLORS['divider']};
-    text-align: center;
-}}
-
-QProgressBar::chunk {{
-    background-color: {COLORS['primary']};
-    border-radius: 4px;
-}}
+    QCheckBox::indicator {{
+        width: 16px;
+        height: 16px;
+    }}
+    
+    QStatusBar {{
+        font-size: 12px;
+    }}
+    
+    QScrollBar:vertical {{
+        border: none;
+        background: {COLORS['background']};
+        width: 10px;
+        margin: 0px 0px 0px 0px;
+    }}
+    QScrollBar::handle:vertical {{
+        background: {COLORS['divider']};
+        min-height: 20px;
+        border-radius: 5px;
+    }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        height: 0px;
+    }}
+    QScrollBar:horizontal {{
+        border: none;
+        background: {COLORS['background']};
+        height: 10px;
+        margin: 0px 0px 0px 0px;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: {COLORS['divider']};
+        min-width: 20px;
+        border-radius: 5px;
+    }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0px;
+    }}
 """
 
 # 欢迎语
 WELCOME_TEXT = """
-<html>
-<head>
-<style>
-h1 {
-    color: #2979FF;
-    margin-bottom: 5px;
-}
-p {
-    font-size: 14px;
-    color: #757575;
-}
-</style>
-</head>
-<body>
-<h1>欢迎使用PPT布局工具</h1>
-<p>该工具可以帮您将PPT幻灯片按指定布局排版到A4纸张上。<br>
-请点击左上方的「选择PPT文件」按钮开始使用。</p>
-</body>
-</html>
+<h1 style="color: #333; font-size: 24px;">欢迎使用PPT布局工具</h1>
+<p style="color: #555; font-size: 14px;">
+  本工具可以帮助您轻松地将PPT幻灯片排版到A4纸上并导出为PDF。<br>
+  请从左侧选择一个PPT文件开始您的旅程。
+</p>
+<ul style="color: #555; text-align: left; padding-left: 30px;">
+  <li>支持 <b>.pptx</b> 和 <b>.ppt</b> 文件格式</li>
+  <li>灵活的布局与页码设置</li>
+  <li>可选的AI智能索引生成</li>
+</ul>
 """
 
 # 步骤指引
 STEPS_GUIDE = [
-    "步骤 1: 选择PPT文件",
-    "步骤 2: 设置每行PPT数量和间距",
-    "步骤 3: 计算并预览布局效果",
-    "步骤 4: 导出PDF文件",
-    "步骤 5: AI生成索引"
+    "选择文件",
+    "布局设置",
+    "效果预览",
+    "导出文件",
+    "AI索引"
 ] 
