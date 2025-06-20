@@ -9,10 +9,15 @@ import shutil
 import atexit
 from pathlib import Path
 import time
+import re
 from PIL import Image, ImageDraw, ImageFont
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT
+from PyPDF2 import PdfWriter, PdfReader
 
 class PPTProcessor:
     """
@@ -186,8 +191,15 @@ class PPTProcessor:
             
             # 加载图片
             slide_images = []
-            print(os.listdir(temp_output_dir))
-            image_files = sorted([f for f in os.listdir(temp_output_dir) if f.endswith(('.png', '.PNG'))])
+            
+            # 使用自然排序确保文件顺序正确
+            def natural_sort_key(s):
+                return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+                
+            image_files = sorted(
+                [f for f in os.listdir(temp_output_dir) if f.endswith(('.png', '.PNG'))],
+                key=natural_sort_key
+            )
             
             for img_file in image_files:
                 img_path = os.path.join(temp_output_dir, img_file)
@@ -306,6 +318,12 @@ class PPTProcessor:
             v_spacing_mm = config["v_spacing"]
             margin_left_mm = config["margin_left"]
             margin_top_mm = config["margin_top"]
+            margin_bottom_mm = config.get("margin_bottom", margin_top_mm)
+            margin_right_mm = config.get("margin_right", margin_left_mm)
+            
+            # 获取页码显示设置
+            show_ppt_numbers = config.get("show_ppt_numbers", True)
+            show_page_numbers = config.get("show_page_numbers", True)
             
             # 计算每页可以放置的幻灯片数量
             items_per_page = rows * columns
@@ -356,14 +374,24 @@ class PPTProcessor:
                         # 将图像添加到PDF
                         c.drawImage(tmp_path, x, y, width, height)
                         
-                        # 添加标记文本
-                        c.setFont("Helvetica", 8)
-                        label = f"{page_idx+1}-{pos+1}"
-                        c.drawString(x, y - 10, label)
+                        # 添加PPT定位页码标记
+                        if show_ppt_numbers:
+                            c.setFont("Helvetica", 8)
+                            label = f"{page_idx+1}-{pos+1}"
+                            # 放在PPT的左下角
+                            c.drawString(x, y - 10, label)
                     except Exception as e:
                         print(f"处理幻灯片 {slide_idx+1} 时出错: {e}")
                         # 如果单个幻灯片处理失败，继续处理下一个
                         continue
+                
+                # 添加纸张页码（在页面右下角）
+                if show_page_numbers:
+                    c.setFont("Helvetica", 10)
+                    # 计算页码位置在右下角
+                    page_number_x = page_width_mm * mm - margin_right_mm * mm - 15
+                    page_number_y = margin_bottom_mm * mm 
+                    c.drawString(page_number_x, page_number_y, f"第 {page_idx+1} 页 / 共 {(slide_count + items_per_page - 1) // items_per_page} 页")
             
             # 保存PDF
             c.save()
@@ -380,3 +408,86 @@ class PPTProcessor:
                         os.unlink(temp_file)
                 except Exception as e:
                     print(f"清理临时文件失败: {temp_file} - {e}")
+    
+    def generate_pdf_with_index(self, markdown_text, content_pdf_path, final_output_path):
+        """
+        将Markdown索引和内容PDF合并
+        
+        Args:
+            markdown_text (str): Markdown格式的索引
+            content_pdf_path (str): 内容PDF的路径
+            final_output_path (str): 最终输出路径
+            
+        Returns:
+            bool: 是否成功
+        """
+        # 创建一个临时的PDF文件用于存放索引
+        index_fd, index_pdf_path = tempfile.mkstemp(suffix=".pdf")
+        os.close(index_fd)
+
+        try:
+            # 1. 将Markdown转换为PDF
+            self._markdown_to_pdf(markdown_text, index_pdf_path)
+
+            # 2. 合并PDF
+            merger = PdfWriter()
+            
+            # 首先添加索引PDF
+            with open(index_pdf_path, "rb") as f:
+                index_pdf = PdfReader(f)
+                merger.append(index_pdf)
+
+            # 然后添加内容PDF
+            with open(content_pdf_path, "rb") as f:
+                content_pdf = PdfReader(f)
+                merger.append(content_pdf)
+
+            # 写入最终文件
+            with open(final_output_path, "wb") as f:
+                merger.write(f)
+            
+            merger.close()
+            return True
+
+        except Exception as e:
+            print(f"合并PDF时出错: {e}")
+            return False
+        finally:
+            # 清理临时的索引PDF
+            if os.path.exists(index_pdf_path):
+                os.unlink(index_pdf_path)
+
+    def _markdown_to_pdf(self, markdown_text, output_path):
+        """
+        一个简单的Markdown到PDF转换器
+        支持 #, ##, ### 标题, - 列表项, 和普通段落
+        """
+        doc = SimpleDocTemplate(output_path, pagesize=A4)
+        styles = getSampleStyleSheet()
+        
+        # 自定义样式
+        styles.add(ParagraphStyle(name='H1', fontSize=18, leading=22, spaceAfter=10, fontName='Helvetica-Bold'))
+        styles.add(ParagraphStyle(name='H2', fontSize=14, leading=18, spaceAfter=8, fontName='Helvetica-Bold'))
+        styles.add(ParagraphStyle(name='H3', fontSize=12, leading=16, spaceAfter=6, fontName='Helvetica-Bold'))
+        styles.add(ParagraphStyle(name='Bullet', leftIndent=20, firstLineIndent=0, spaceAfter=4, leading=14))
+        
+        story = []
+        lines = markdown_text.split('\n')
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith('###'):
+                story.append(Paragraph(line.replace('###', '').strip(), styles['H3']))
+            elif line.startswith('##'):
+                story.append(Paragraph(line.replace('##', '').strip(), styles['H2']))
+            elif line.startswith('#'):
+                story.append(Paragraph(line.replace('#', '').strip(), styles['H1']))
+            elif line.startswith(('-', '*')):
+                story.append(Paragraph(line[1:].strip(), styles['Bullet'], bulletText='•'))
+            else:
+                story.append(Paragraph(line, styles['Normal']))
+            
+        doc.build(story)

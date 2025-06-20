@@ -3,9 +3,10 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                            QScrollArea, QGroupBox, QDoubleSpinBox, QMessageBox,
                            QSizePolicy, QFrame, QGridLayout, QProgressBar,
                            QStatusBar, QToolButton, QTabWidget, QWizard, 
-                           QWizardPage, QStackedWidget, QRadioButton, QButtonGroup)
+                           QWizardPage, QStackedWidget, QRadioButton, QButtonGroup,
+                           QCheckBox, QTextEdit, QApplication)
 from PyQt6.QtCore import Qt, QRectF, QSize
-from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon, QMovie, QPainterPath
 
 import os
 from pptx import Presentation
@@ -23,47 +24,33 @@ class StepIndicator(QFrame):
         self.steps = steps
         self.current_step = 0
         
-        # 创建布局
         layout = QHBoxLayout(self)
         layout.setSpacing(0)
         layout.setContentsMargins(0, 10, 0, 10)
         
-        # 创建步骤指示器
-        self.step_labels = []
+        self.step_widgets = []
         for i, step_text in enumerate(steps):
-            # 步骤圆圈
-            step_frame = QFrame()
-            step_frame.setFixedSize(32, 32)
-            step_frame.setObjectName("stepCircle")
-            step_frame.setStyleSheet(f"""
-                QFrame#stepCircle {{
-                    background-color: {COLORS['divider']};
-                    border-radius: 16px;
-                    color: {COLORS['text_secondary']};
-                }}
-            """)
+            # Step Container
+            step_container = QWidget()
+            step_layout = QVBoxLayout(step_container)
+            step_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            step_layout.setContentsMargins(5, 0, 5, 0)
+
+            # Icon/Number Label
+            icon_label = QLabel()
+            icon_label.setFixedSize(32, 32)
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             
-            # 步骤数字
-            step_number = QLabel(str(i + 1))
-            step_number.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            step_number_layout = QVBoxLayout(step_frame)
-            step_number_layout.setContentsMargins(0, 0, 0, 0)
-            step_number_layout.addWidget(step_number)
+            # Text Label
+            text_label = QLabel(step_text)
+            text_label.setObjectName(f"stepLabel{i}")
             
-            # 步骤文本
-            step_label = QLabel(step_text)
-            step_label.setObjectName(f"stepLabel{i}")
+            step_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
+            step_layout.addWidget(text_label, 0, Qt.AlignmentFlag.AlignCenter)
             
-            # 添加到布局
-            step_container = QVBoxLayout()
-            step_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            step_container.addWidget(step_frame, 0, Qt.AlignmentFlag.AlignCenter)
-            step_container.addWidget(step_label, 0, Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(step_container)
+            self.step_widgets.append({'container': step_container, 'icon': icon_label, 'text': text_label})
             
-            layout.addLayout(step_container)
-            self.step_labels.append((step_frame, step_label))
-            
-            # 添加连接线（除了最后一步）
             if i < len(steps) - 1:
                 line = QFrame()
                 line.setFrameShape(QFrame.Shape.HLine)
@@ -71,41 +58,74 @@ class StepIndicator(QFrame):
                 line.setStyleSheet(f"background-color: {COLORS['divider']};")
                 line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 layout.addWidget(line)
-    
+                
+        # 准备加载动画
+        # 注意: 需要一个loading.gif文件放在resources目录下
+        loading_gif_path = os.path.join("resources", "loading.gif")
+        self.loading_movie = QMovie(loading_gif_path)
+        self.loading_movie.setScaledSize(QSize(28, 28))
+
     def set_current_step(self, step):
         if 0 <= step < len(self.steps):
             self.current_step = step
             
-            for i, (circle, label) in enumerate(self.step_labels):
+            for i, widget_group in enumerate(self.step_widgets):
+                icon_label = widget_group['icon']
+                text_label = widget_group['text']
+                
+                # 停止之前的动画
+                if icon_label.movie():
+                    icon_label.movie().stop()
+                    icon_label.setMovie(None)
+
                 if i < step:
-                    # 已完成步骤
-                    circle.setStyleSheet(f"""
-                        QFrame#stepCircle {{
-                            background-color: {COLORS['success']};
-                            border-radius: 16px;
-                            color: white;
-                        }}
-                    """)
+                    # 已完成步骤: 显示勾选图标
+                    pixmap = QPixmap(32, 32)
+                    pixmap.fill(Qt.GlobalColor.transparent)
+                    p = QPainter(pixmap)
+                    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    p.setBrush(QColor(COLORS['success']))
+                    p.setPen(Qt.GlobalColor.transparent)
+                    p.drawEllipse(0, 0, 32, 32)
+                    
+                    pen = QPen(QColor("white"), 2)
+                    p.setPen(pen)
+                    path = QPainterPath()
+                    path.moveTo(9, 16)
+                    path.lineTo(14, 21)
+                    path.lineTo(23, 12)
+                    p.drawPath(path)
+                    p.end()
+                    
+                    icon_label.setPixmap(pixmap)
+                    text_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: normal;")
+                    
                 elif i == step:
-                    # 当前步骤
-                    circle.setStyleSheet(f"""
-                        QFrame#stepCircle {{
+                    # 当前步骤: 显示加载动画
+                    if self.loading_movie.isValid():
+                        icon_label.setMovie(self.loading_movie)
+                        self.loading_movie.start()
+                    else:
+                        # Fallback to number if GIF not found
+                        icon_label.setText(str(i + 1))
+                        icon_label.setStyleSheet(f"""
                             background-color: {COLORS['primary']};
                             border-radius: 16px;
                             color: white;
-                        }}
-                    """)
-                    label.setStyleSheet(f"font-weight: bold; color: {COLORS['primary']};")
+                            font-weight: bold;
+                        """)
+                    text_label.setStyleSheet(f"color: {COLORS['primary']}; font-weight: bold;")
+                    
                 else:
-                    # 未完成步骤
-                    circle.setStyleSheet(f"""
-                        QFrame#stepCircle {{
-                            background-color: {COLORS['divider']};
-                            border-radius: 16px;
-                            color: {COLORS['text_secondary']};
-                        }}
+                    # 未完成步骤: 显示数字
+                    icon_label.setText(str(i + 1))
+                    icon_label.setStyleSheet(f"""
+                        background-color: {COLORS['divider']};
+                        border-radius: 16px;
+                        color: {COLORS['text_secondary']};
+                        font-weight: normal;
                     """)
-                    label.setStyleSheet("")
+                    text_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-weight: normal;")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -129,6 +149,8 @@ class MainWindow(QMainWindow):
             "h_spacing": 5,  # 水平间距(mm)
             "v_spacing": 5,  # 垂直间距(mm)
             "is_landscape": True,  # 默认为横向A4
+            "show_ppt_numbers": True,  # 显示PPT定位页码
+            "show_page_numbers": True,  # 显示纸张页码
         }
         
         self.current_step = 0
@@ -165,6 +187,7 @@ class MainWindow(QMainWindow):
         self.create_step2_page()  # 布局设置页面
         self.create_step3_page()  # 预览页面
         self.create_step4_page()  # 导出页面
+        self.create_step5_page()  # AI索引页面
         
         main_layout.addWidget(self.stacked_widget)
         
@@ -349,6 +372,21 @@ class MainWindow(QMainWindow):
         self.margin_bottom_spin.valueChanged.connect(self.update_margins)
         settings_layout.addWidget(self.margin_bottom_spin, 3, 3)
         
+        # 添加显示页码选项
+        settings_layout.addWidget(QLabel("页码设置:"), 4, 0)
+        
+        # 添加PPT定位页码选项
+        self.show_ppt_numbers_check = QCheckBox("显示PPT定位页码")
+        self.show_ppt_numbers_check.setChecked(self.layout_config["show_ppt_numbers"])
+        self.show_ppt_numbers_check.stateChanged.connect(self.update_page_numbers)
+        settings_layout.addWidget(self.show_ppt_numbers_check, 4, 1)
+        
+        # 添加纸张页码选项
+        self.show_page_numbers_check = QCheckBox("显示纸张页码")
+        self.show_page_numbers_check.setChecked(self.layout_config["show_page_numbers"])
+        self.show_page_numbers_check.stateChanged.connect(self.update_page_numbers)
+        settings_layout.addWidget(self.show_page_numbers_check, 4, 3)
+        
         layout.addWidget(settings_group)
         
         # 提示信息
@@ -414,7 +452,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(20)
         
         # 导出设置区域
-        export_group = QGroupBox("导出设置")
+        export_group = QGroupBox("导出PDF")
         export_layout = QVBoxLayout(export_group)
         
         # 导出摘要信息
@@ -426,7 +464,7 @@ class MainWindow(QMainWindow):
         export_btn_layout = QHBoxLayout()
         export_btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        self.export_btn = QPushButton("导出PDF")
+        self.export_btn = QPushButton("仅导出内容PDF")
         self.export_btn.setObjectName("accentButton")
         self.export_btn.setMinimumHeight(40)
         self.export_btn.clicked.connect(self.process_ppt)
@@ -437,16 +475,74 @@ class MainWindow(QMainWindow):
         layout.addWidget(export_group)
         
         # 导出结果区域
-        result_group = QGroupBox("导出结果")
-        result_layout = QVBoxLayout(result_group)
+        self.result_group = QGroupBox("导出结果")
+        result_layout = QVBoxLayout(self.result_group)
         
         self.export_result = QLabel("点击上方按钮开始导出")
         self.export_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
         result_layout.addWidget(self.export_result)
         
-        layout.addWidget(result_group)
+        layout.addWidget(self.result_group)
+        
+        # 添加AI索引选项
+        self.ai_index_button = QPushButton("可选：添加AI索引 >")
+        self.ai_index_button.clicked.connect(self.go_to_ai_step)
+        self.ai_index_button.setVisible(False) # 导出成功后显示
+        layout.addWidget(self.ai_index_button, 0, Qt.AlignmentFlag.AlignRight)
         
         # 添加到堆叠式部件
+        self.stacked_widget.addWidget(page)
+    
+    def create_step5_page(self):
+        """创建步骤5：AI索引生成页面"""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 20, 0, 0)
+        layout.setSpacing(15)
+
+        # 1. 提示词生成区域
+        prompt_group = QGroupBox("1. 生成并复制提示词")
+        prompt_layout = QVBoxLayout(prompt_group)
+
+        self.ai_prompt_text = QTextEdit()
+        self.ai_prompt_text.setReadOnly(True)
+        self.ai_prompt_text.setPlaceholderText("在这里生成给AI的提示词...")
+        self.ai_prompt_text.setMinimumHeight(150)
+        prompt_layout.addWidget(self.ai_prompt_text)
+
+        copy_prompt_btn = QPushButton("复制提示词")
+        copy_prompt_btn.clicked.connect(self.copy_ai_prompt)
+        prompt_layout.addWidget(copy_prompt_btn, 0, Qt.AlignmentFlag.AlignRight)
+        
+        layout.addWidget(prompt_group)
+
+        # 2. 粘贴Markdown区域
+        markdown_group = QGroupBox("2. 粘贴AI返回的Markdown索引")
+        markdown_layout = QVBoxLayout(markdown_group)
+
+        self.ai_markdown_input = QTextEdit()
+        self.ai_markdown_input.setPlaceholderText("请将AI生成的Markdown格式索引粘贴到此处。")
+        self.ai_markdown_input.setMinimumHeight(200)
+        markdown_layout.addWidget(self.ai_markdown_input)
+
+        layout.addWidget(markdown_group)
+
+        # 3. 生成最终PDF
+        final_export_group = QGroupBox("3. 生成最终PDF")
+        final_export_layout = QVBoxLayout(final_export_group)
+
+        self.final_export_btn = QPushButton("合并生成带索引的PDF")
+        self.final_export_btn.setObjectName("accentButton")
+        self.final_export_btn.setMinimumHeight(40)
+        self.final_export_btn.clicked.connect(self.generate_final_pdf_with_index)
+        final_export_layout.addWidget(self.final_export_btn)
+
+        self.final_export_result = QLabel()
+        self.final_export_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        final_export_layout.addWidget(self.final_export_result)
+        
+        layout.addWidget(final_export_group)
+
         self.stacked_widget.addWidget(page)
     
     def show_welcome_screen(self):
@@ -477,12 +573,15 @@ class MainWindow(QMainWindow):
             summary += f"<p>页面方向: <b>{orientation_text}A4</b></p>"
             summary += f"<p>布局: 每页 <b>{layout_result['rows']}</b> 行 × <b>{layout_result['columns']}</b> 列</p>"
             summary += f"<p>预计页数: <b>{layout_result['pages_needed']}</b> 页PDF</p>"
-            summary += "<p>点击「导出PDF」按钮选择保存位置并开始导出</p>"
+            summary += "<p>点击「仅导出内容PDF」按钮选择保存位置并开始导出</p>"
             
             self.export_summary.setText(summary)
+            # 重置第四步状态
+            self.export_result.setText("点击上方按钮开始导出")
+            self.ai_index_button.setVisible(False)
             
         # 前往下一步
-        if current_index < self.stacked_widget.count() - 1:
+        if current_index < self.stacked_widget.count() - 2: # Stop before AI step
             self.stacked_widget.setCurrentIndex(current_index + 1)
             self.step_indicator.set_current_step(current_index + 1)
             
@@ -492,7 +591,7 @@ class MainWindow(QMainWindow):
             
             # 更新按钮状态
             self.prev_btn.setEnabled(True)
-            self.next_btn.setEnabled(current_index < self.stacked_widget.count() - 2)
+            self.next_btn.setEnabled(current_index < self.stacked_widget.count() - 3)
     
     def go_to_prev_step(self):
         """返回上一步"""
@@ -573,6 +672,23 @@ class MainWindow(QMainWindow):
         self.layout_config["margin_top"] = self.margin_top_spin.value()
         self.layout_config["margin_bottom"] = self.margin_bottom_spin.value()
     
+    def update_page_numbers(self):
+        """更新页码设置"""
+        self.layout_config["show_ppt_numbers"] = self.show_ppt_numbers_check.isChecked()
+        self.layout_config["show_page_numbers"] = self.show_page_numbers_check.isChecked()
+        page_numbers_text = []
+        
+        if self.layout_config["show_ppt_numbers"]:
+            page_numbers_text.append("PPT定位页码")
+            
+        if self.layout_config["show_page_numbers"]:
+            page_numbers_text.append("纸张页码")
+            
+        if page_numbers_text:
+            self.status_bar.showMessage(f"已启用页码显示: {', '.join(page_numbers_text)}")
+        else:
+            self.status_bar.showMessage("已禁用所有页码显示")
+    
     def refresh_preview(self):
         """刷新预览"""
         if not self.slide_images:
@@ -599,6 +715,19 @@ class MainWindow(QMainWindow):
         result_text += f"<p>布局结果: 每页 <b>{layout_result['rows']}</b> 行 × <b>{layout_result['columns']}</b> 列</p>"
         result_text += f"<p>每个PPT尺寸: <b>{layout_result['item_width']:.1f}</b> × <b>{layout_result['item_height']:.1f}</b> mm</p>"
         result_text += f"<p>预计页数: <b>{layout_result['pages_needed']}</b> 页</p>"
+        
+        # 添加页码设置信息
+        page_numbers_text = []
+        if self.layout_config["show_ppt_numbers"]:
+            page_numbers_text.append("PPT定位页码")
+        if self.layout_config["show_page_numbers"]:
+            page_numbers_text.append("纸张页码")
+        
+        if page_numbers_text:
+            result_text += f"<p>页码显示: <b>{', '.join(page_numbers_text)}</b></p>"
+        else:
+            result_text += "<p>页码显示: <b>无</b></p>"
+            
         self.preview_info.setText(result_text)
         
         # 创建预览
@@ -640,6 +769,8 @@ class MainWindow(QMainWindow):
         # 绘制PPT预览
         left_margin = self.layout_config["margin_left"] * scale_factor
         top_margin = self.layout_config["margin_top"] * scale_factor
+        right_margin = self.layout_config["margin_right"] * scale_factor
+        bottom_margin = self.layout_config["margin_bottom"] * scale_factor
         item_width = layout_result["item_width"] * scale_factor
         item_height = layout_result["item_height"] * scale_factor
         h_spacing = self.layout_config["h_spacing"] * scale_factor
@@ -669,6 +800,27 @@ class MainWindow(QMainWindow):
                         Qt.AlignmentFlag.AlignCenter,
                         f"PPT {item_num}"
                     )
+                    
+                    # 显示PPT定位页码
+                    if self.layout_config["show_ppt_numbers"]:
+                        painter.setFont(QFont("Arial", 8))
+                        painter.drawText(
+                            int(x), int(y + item_height + 12),
+                            f"{item_num}"
+                        )
+                        painter.setFont(font)  # 恢复字体
+        
+        # 显示纸张页码
+        if self.layout_config["show_page_numbers"]:
+            painter.setFont(QFont("Arial", 10))
+            page_number_text = "第 1 页 / 共 1 页"  # 预览中只显示第一页
+            # 在右下角显示页码
+            text_width = painter.fontMetrics().horizontalAdvance(page_number_text)
+            painter.drawText(
+                page_width_px - int(right_margin) - text_width - 10,
+                page_height_px - int(bottom_margin),
+                page_number_text
+            )
         
         painter.end()
         
@@ -695,6 +847,8 @@ class MainWindow(QMainWindow):
         if not output_path:
             return
         
+        self.content_pdf_path = output_path  # 保存内容PDF的路径
+        
         # 更新状态栏和结果显示
         self.status_bar.showMessage("正在生成PDF...")
         self.export_result.setText("<p>正在处理，请稍候...</p>")
@@ -718,6 +872,8 @@ class MainWindow(QMainWindow):
             
             # 弹出成功提示
             QMessageBox.information(self, "导出成功", f"PDF已成功保存到:\n{output_path}")
+            # 显示进入AI索引步骤的按钮
+            self.ai_index_button.setVisible(True)
         else:
             self.export_result.setText(f"<p style='color:{COLORS['error']};'><b>导出失败!</b></p><p>请检查文件权限和磁盘空间</p>")
             self.status_bar.showMessage("PDF导出失败")
@@ -729,6 +885,100 @@ class MainWindow(QMainWindow):
         self.ppt_processor.cleanup_temp_files()
         
         self.export_btn.setEnabled(True)
+    
+    def go_to_ai_step(self):
+        """跳转到AI索引步骤"""
+        self.step_indicator.set_current_step(4)
+        self.stacked_widget.setCurrentIndex(4)
+        
+        # 生成并显示提示词
+        self._generate_ai_prompt()
+
+        # 更新按钮状态
+        self.next_btn.setEnabled(False)
+        self.prev_btn.setEnabled(True)
+    
+    def copy_ai_prompt(self):
+        """复制AI提示词到剪贴板"""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.ai_prompt_text.toPlainText())
+        self.status_bar.showMessage("提示词已复制到剪贴板", 3000)
+    
+    def _generate_ai_prompt(self):
+        """生成给AI的提示词"""
+        if not self.slide_images:
+            return
+
+        layout_result = self.layout_calculator.calculate_layout(
+            self.slide_images, self.layout_config
+        )
+        total_slides = len(self.slide_images)
+        items_per_page = layout_result["rows"] * layout_result["columns"]
+
+        prompt = f"""
+我有一份包含 {total_slides} 张幻灯片的演示文稿。
+我已经将它排版成一个PDF文档，每页包含 {items_per_page} 张幻灯片。共有 {layout_result['pages_needed']} 页。
+
+幻灯片的编号方式如下：
+- 每页幻灯片从左上角开始，从1开始编号，按行从左到右，从上到下依次编号。
+- 您在最终的索引中，只需要引用这个编号即可。
+
+例如：
+- 索引的计算方式为 "(floor(PPT位置 / 每页幻灯片数)+1) - (PPT位置 % 每页幻灯片数)"
+- 一个幻灯片在PPT中的位置为14，则生成的索引为： (floor(14 / {items_per_page})+1)-{14 % items_per_page}
+- 如果每页包含2张幻灯片，一个幻灯片在PPT中的页号为25，则其索引为： (floor(25 / 2)+1)-{25 % 2} = 13-1
+
+请您根据我稍后提供的所有幻灯片内容，为我生成一份详细的、树状结构的知识点索引目录。
+索引需要采用Markdown格式，包含清晰的层级关系（例如使用#、##、-等）。
+请确保索引覆盖所有关键知识点，并准确地将每个知识点定位到对应的幻灯片编号。
+内容请具体到各个内容标题下的知识点，给出的更多的知识点内容及其索引。
+"""
+        self.ai_prompt_text.setText(prompt.strip())
+    
+    def generate_final_pdf_with_index(self):
+        """生成包含AI索引的最终PDF"""
+        markdown_text = self.ai_markdown_input.toPlainText()
+        if not markdown_text.strip():
+            QMessageBox.warning(self, "警告", "请输入AI生成的Markdown索引内容。")
+            return
+
+        if not hasattr(self, 'content_pdf_path') or not self.content_pdf_path:
+            QMessageBox.critical(self, "错误", "未找到已导出的内容PDF，请先完成第四步。")
+            return
+            
+        self.final_export_result.setText("正在生成索引并合并PDF...")
+        self.final_export_btn.setEnabled(False)
+
+        # 让用户选择最终保存位置
+        final_output_path, _ = QFileDialog.getSaveFileName(
+            self, "保存带索引的PDF文件", os.path.dirname(self.content_pdf_path), "PDF文件 (*.pdf)"
+        )
+
+        if not final_output_path:
+            self.final_export_btn.setEnabled(True)
+            self.final_export_result.setText("")
+            return
+        
+        # 调用处理器完成工作
+        try:
+            success = self.ppt_processor.generate_pdf_with_index(
+                markdown_text,
+                self.content_pdf_path,
+                final_output_path
+            )
+
+            if success:
+                self.final_export_result.setText(f"<p style='color:{COLORS['success']};'><b>带索引的PDF导出成功!</b></p><p>文件保存在: {final_output_path}</p>")
+                QMessageBox.information(self, "成功", f"带索引的最终PDF已保存到:\n{final_output_path}")
+            else:
+                raise Exception("合并PDF失败")
+
+        except Exception as e:
+            self.final_export_result.setText(f"<p style='color:{COLORS['error']};'><b>最终PDF生成失败!</b></p><p>错误: {e}</p>")
+            QMessageBox.critical(self, "失败", f"生成最终PDF时出错: {e}")
+        
+        finally:
+            self.final_export_btn.setEnabled(True)
     
     def closeEvent(self, event):
         """程序关闭时清理临时文件"""

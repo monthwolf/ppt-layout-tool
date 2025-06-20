@@ -5,4 +5,5 @@ comtypes==1.1.14
 Pillow==9.5.0
 reportlab==3.6.12
 qt-material==2.14
-darkdetect==0.8.0 
+darkdetect==0.8.0
+PyPDF2 
