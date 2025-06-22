@@ -1,6 +1,8 @@
-import sys
-from pathlib import Path
 import os
+import sys
+import time
+from pathlib import Path
+from collections import defaultdict
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
                            QPushButton, QSpinBox, QLabel, QFileDialog, 
                            QScrollArea, QGroupBox, QDoubleSpinBox, QMessageBox,
@@ -541,6 +543,9 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(preview_group)
         
+        # 指示当前是否已经生成过预览的标志
+        self.preview_generated = False
+        
         # 添加到堆叠式部件
         self.stacked_widget.addWidget(page)
     
@@ -600,8 +605,16 @@ class MainWindow(QMainWindow):
     def create_step5_page(self):
         """创建步骤5：AI索引页面（可选）"""
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 20, 0, 0)
+        
+        # 创建主滚动区域
+        scroll_area = QScrollArea(page)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        
+        # 创建一个容器widget来放置所有的内容
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(0, 20, 0, 20)  # 添加底部边距，确保滚动时内容不被截断
         layout.setSpacing(20)
         
         # AI提示词区域
@@ -658,6 +671,14 @@ class MainWindow(QMainWindow):
         final_export_layout.addWidget(self.final_export_result)
         
         layout.addWidget(final_export_group)
+        
+        # 设置滚动区域的内容
+        scroll_area.setWidget(scroll_content)
+        
+        # 设置主页面布局
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.addWidget(scroll_area)
 
         self.stacked_widget.addWidget(page)
     
@@ -692,8 +713,15 @@ class MainWindow(QMainWindow):
             self.step_indicator.set_current_step(current_index + 1)
             self.stacked_widget.setCurrentIndex(current_index + 1)
             
-            if self.stacked_widget.currentIndex() == 2:
-                self.refresh_preview()
+            # 在进入第三步时自动生成预览
+            next_index = current_index + 1
+            if next_index == 2:  # 第三步索引为2
+                # 显示加载覆盖层
+                self.loading_overlay.set_text("正在生成布局预览...")
+                self.loading_overlay.show()
+                
+                # 使用延时确保UI已经更新
+                QTimer.singleShot(100, self._generate_preview_with_loading)
             
             self.prev_btn.setEnabled(True)
             
@@ -701,6 +729,15 @@ class MainWindow(QMainWindow):
             # 当到达第四步时，禁用下一步按钮（因为第五步是可选的）
             is_last_regular_step = current_index >= self.stacked_widget.count() - 3  # 倒数第二个常规步骤
             self.next_btn.setEnabled(not is_last_regular_step)
+
+    def _generate_preview_with_loading(self):
+        """带加载覆盖层的预览生成"""
+        try:
+            # 刷新预览
+            self.refresh_preview()
+        finally:
+            # 无论成功与否，都隐藏加载覆盖层
+            self.loading_overlay.hide()
 
     def go_to_prev_step(self):
         current_index = self.stacked_widget.currentIndex()
@@ -729,6 +766,9 @@ class MainWindow(QMainWindow):
             
             self.loading_overlay.set_text("正在转换PPT文件...")
             self.loading_overlay.show()
+            
+            # 显示进度条
+            self.loading_overlay.set_progress(0, 100, "准备处理PPT文件...")
 
             # 关闭之前的图像以释放资源
             if self.slide_images:
@@ -740,11 +780,28 @@ class MainWindow(QMainWindow):
                         pass
                 self.slide_images = []
 
-            # 在工作线程中转换PPT
-            self.worker = Worker(self.ppt_processor.convert_ppt_to_images, file_path)
+            # 定义进度回调函数
+            def progress_callback(current, total, message):
+                # 在UI线程中更新进度条
+                self.loading_overlay.set_progress(current, total, message)
+
+            # 在工作线程中转换PPT，并传递进度回调
+            self.worker = Worker(
+                self.ppt_processor.convert_ppt_to_images, 
+                file_path,
+                progress_callback=self._update_progress
+            )
             self.worker.finished.connect(self._on_ppt_conversion_finished)
             self.worker.error.connect(self._on_task_error)
+            
+            # 连接进度信号
+            self.worker.progress.connect(self._update_progress)
+            
             self.worker.start()
+
+    def _update_progress(self, current, total, message):
+        """更新加载覆盖层的进度"""
+        self.loading_overlay.set_progress(current, total, message)
 
     def _on_ppt_conversion_finished(self, slide_images):
         """PPT转换完成后的回调"""
@@ -982,19 +1039,27 @@ class MainWindow(QMainWindow):
         
         self.loading_overlay.set_text("正在生成内容PDF...")
         self.loading_overlay.show()
+        self.loading_overlay.set_progress(0, 100, "准备生成PDF...")
         self.export_btn.setEnabled(False)
 
         layout_result = self.layout_calculator.calculate_layout(self.slide_images, self.layout_config)
+        
+        # 定义进度回调函数
+        def progress_callback(current, total, message):
+            # 在UI线程中更新进度条
+            self.loading_overlay.set_progress(current, total, message)
         
         self.worker = Worker(
             self.ppt_processor.generate_pdf, 
             self.slide_images, 
             self.content_pdf_path,
             layout_result, 
-            self.layout_config
+            self.layout_config,
+            progress_callback=self._update_progress
         )
         self.worker.finished.connect(lambda success: self._on_content_pdf_generated(success, self.content_pdf_path))
         self.worker.error.connect(self._on_task_error)
+        self.worker.progress.connect(self._update_progress)
         self.worker.start()
 
     def _on_content_pdf_generated(self, success, output_path):
@@ -1086,17 +1151,25 @@ class MainWindow(QMainWindow):
             
         self.loading_overlay.set_text("正在生成带索引的PDF...")
         self.loading_overlay.show()
+        self.loading_overlay.set_progress(0, 100, "准备生成索引PDF...")
         self.final_export_btn.setEnabled(False)
+        
+        # 定义进度回调函数
+        def progress_callback(current, total, message):
+            # 在UI线程中更新进度条
+            self.loading_overlay.set_progress(current, total, message)
         
         # 使用异步线程生成PDF
         self.worker = Worker(
             self.ppt_processor.generate_pdf_with_index, 
             markdown_text,
             self.content_pdf_path,
-            final_output_path
+            final_output_path,
+            progress_callback=self._update_progress
         )
         self.worker.finished.connect(lambda success: self._on_final_pdf_generated(success, final_output_path))
         self.worker.error.connect(self._on_task_error)
+        self.worker.progress.connect(self._update_progress)
         self.worker.start()
 
     def _on_final_pdf_generated(self, success, final_output_path):

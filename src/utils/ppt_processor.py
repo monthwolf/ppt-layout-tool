@@ -86,198 +86,274 @@ class PPTProcessor:
         self.temp_files.append(temp_path)
         return temp_path
     
-    def convert_ppt_to_images(self, ppt_path):
+    def convert_ppt_to_images(self, ppt_path, progress_callback=None):
         """
-        将PPT文件转换为图像列表
+        将PPT转换为图像列表
         
         Args:
-            ppt_path: PPT文件路径
+            ppt_path (str): PPT文件路径
+            progress_callback (callable, optional): 进度回调函数，接收三个参数：当前进度，总进度，描述文本
             
         Returns:
-            图像列表
+            list: 图像列表
         """
-        try:
-            slide_images = []
-            file_ext = os.path.splitext(ppt_path)[1].lower()
-            
-            # 检查文件是否存在
-            if not os.path.exists(ppt_path):
-                print(f"文件不存在: {ppt_path}")
-                return self._create_mock_slides(5)  # 返回模拟幻灯片
-                
-            # 根据文件类型选择处理方法
-            if file_ext == '.pptx':
-                try:
-                    # 尝试使用python-pptx直接读取
-                    from pptx import Presentation
-                    try:
-                        presentation = Presentation(ppt_path)
-                        slide_count = len(presentation.slides)
-                        return self._create_mock_slides(slide_count)
-                    except Exception as e:
-                        print(f"python-pptx读取失败: {e}")
-                        # 如果python-pptx失败，回退到其他方法
-                        return self._try_alternative_conversion(ppt_path)
-                except ImportError:
-                    print("python-pptx库未安装或导入失败")
-                    return self._try_alternative_conversion(ppt_path)
-            else:
-                # 对于.ppt文件，直接使用替代方法
-                return self._try_alternative_conversion(ppt_path)
-                
-        except Exception as e:
-            print(f"转换PPT时发生错误: {e}")
-            # 返回5张模拟幻灯片，确保程序可以继续运行
-            return self._create_mock_slides(5)
-        finally:
-            # 每次转换完成后清理临时文件
-            self.cleanup_temp_files()
-    
-    def _try_alternative_conversion(self, ppt_path):
-        """尝试使用替代方法转换PPT"""
-        try:
-            # 尝试使用COM接口（仅Windows可用）
-            if sys.platform == 'win32':
-                return self._convert_using_com(ppt_path)
-            else:
-                # 对于非Windows系统，使用模拟方式
-                return self._create_mock_slides(10)
-        except Exception as e:
-            print(f"替代转换方法失败: {e}")
-            # 如果所有方法都失败，使用模拟幻灯片
-            return self._create_mock_slides(10)
-    
-    def _convert_using_com(self, ppt_path):
-        """使用PowerPoint COM接口转换PPT为图像（仅Windows可用）"""
-        ppt_app = None
-        presentation = None
-        temp_output_dir = None
+        if not os.path.exists(ppt_path):
+            print(f"文件不存在: {ppt_path}")
+            return []
+        
+        # 确定PPT的格式
+        is_pptx = ppt_path.lower().endswith('.pptx')
+        is_ppt = ppt_path.lower().endswith('.ppt')
+        
+        if not (is_pptx or is_ppt):
+            print(f"不支持的文件格式: {ppt_path}")
+            return []
+        
+        # 使用PPTX库处理.pptx文件
+        if is_pptx:
+            try:
+                return self._convert_pptx_to_images(ppt_path, progress_callback)
+            except Exception as e:
+                print(f"PPTX转换失败: {e}，尝试使用COM方式")
+                return self._convert_ppt_via_com(ppt_path, progress_callback)
+        
+        # 使用COM处理.ppt文件
+        if is_ppt:
+            return self._convert_ppt_via_com(ppt_path, progress_callback)
+        
+        return []
+        
+    def _convert_pptx_to_images(self, pptx_path, progress_callback=None):
+        """
+        使用python-pptx库将PPTX转换为图像
+        
+        Args:
+            pptx_path (str): PPTX文件路径
+            progress_callback (callable, optional): 进度回调函数
+        
+        Returns:
+            list: 图像列表
+        """
+        from pptx import Presentation
         
         try:
-            import comtypes.client  # type: ignore
-            
-            # 创建临时文件夹存储图片
-            temp_output_dir = os.path.join(self.temp_dir if self.temp_dir else tempfile.gettempdir(), "ppt_export_" + str(int(time.time())))
-            os.makedirs(temp_output_dir, exist_ok=True)
-            
-            # 尝试启动PowerPoint
-            ppt_app = comtypes.client.CreateObject("PowerPoint.Application")  # type: ignore
-            ppt_app.Visible = True  # 设置为可见，以便观察过程
-            
-            # 规范化文件路径，使用绝对路径
-            abs_path = os.path.abspath(ppt_path)
-            
-            # 打开演示文稿 - 跳过类型检查，因为COM对象的类型系统与Python不兼容
-            presentation = ppt_app.Presentations.Open(str(abs_path), WithWindow=False)  # type: ignore
+            presentation = Presentation(pptx_path)
             
             # 获取幻灯片数量
-            slide_count = presentation.Slides.Count
-            print(f"检测到 {slide_count} 张幻灯片")
+            slides = list(presentation.slides)
+            slide_count = len(slides)
             
-            # 保存为图片
-            presentation.Export(temp_output_dir, "PNG")
+            # 如果没有幻灯片，则返回空列表
+            if slide_count == 0:
+                return []
             
-            # 关闭演示文稿
-            try:
-                if presentation:
-                    presentation.Close()
-                    presentation = None
-            except:
-                pass
+            # 使用LibreOffice或OpenOffice转换PPTX为PDF
+            pdf_path = self.create_temp_file(suffix='.pdf')
+            self.temp_files.append(pdf_path)
             
-            # 关闭PowerPoint应用程序
-            try:
-                if ppt_app:
-                    ppt_app.Quit()
-                    ppt_app = None
-            except:
-                pass
+            result = self._convert_to_pdf_with_libreoffice(pptx_path, pdf_path)
+            if not result:
+                # 如果LibreOffice转换失败，尝试使用COM接口
+                return self._convert_ppt_via_com(pptx_path, progress_callback)
             
-            # 加载图片
-            slide_images = []
-            
-            # 使用自然排序确保文件顺序正确
-            def natural_sort_key(s):
-                return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
-                
-            image_files = sorted(
-                [f for f in os.listdir(temp_output_dir) if f.endswith(('.png', '.PNG'))],
-                key=natural_sort_key
-            )
-            
-            for img_file in image_files:
-                img_path = os.path.join(temp_output_dir, img_file)
-                # print(img_path)
-                try:
-                    img = Image.open(img_path)
-                    slide_images.append(img.copy())  # 复制图像对象，以便关闭原始文件
-                except Exception as e:
-                    print(f"加载图片失败 {img_path}: {e}")
-            # print(slide_images)
-            return slide_images
+            # 将PDF转换为图片
+            return self._convert_pdf_to_images(pdf_path, progress_callback)
+        
         except Exception as e:
-            print(f"COM接口转换失败: {e}")
-            return self._create_mock_slides(10)
-        finally:
-            # 确保清理资源
-            try:
-                if presentation:
-                    presentation.Close()
-            except:
-                pass
-            
-            try:
-                if ppt_app:
-                    ppt_app.Quit()
-            except:
-                pass
+            print(f"转换PPTX时出错: {e}")
+            # 如果python-pptx处理失败，尝试使用COM接口
+            return self._convert_ppt_via_com(pptx_path, progress_callback)
     
-    def _create_mock_slides(self, count=5):
-        """创建模拟幻灯片图像
+    def _convert_to_pdf_with_libreoffice(self, input_path, output_path):
+        """
+        使用LibreOffice转换文档为PDF
         
         Args:
-            count: 要创建的幻灯片数量
+            input_path (str): 输入文件路径
+            output_path (str): 输出PDF路径
             
         Returns:
-            模拟幻灯片图像列表
+            bool: 是否成功
+        """
+        try:
+            # 检查是否安装了LibreOffice/OpenOffice
+            if sys.platform == "win32":
+                libreoffice_paths = [
+                    "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+                    "C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe",
+                    "C:\\Program Files\\OpenOffice\\program\\soffice.exe",
+                    "C:\\Program Files (x86)\\OpenOffice\\program\\soffice.exe",
+                ]
+                soffice_path = None
+                for path in libreoffice_paths:
+                    if os.path.exists(path):
+                        soffice_path = path
+                        break
+            else:
+                soffice_path = "soffice"  # 在Linux/Mac上尝试直接使用命令
+            
+            if not soffice_path:
+                print("未找到LibreOffice/OpenOffice")
+                return False
+            
+            # 构建命令
+            cmd = [
+                soffice_path,
+                "--headless",
+                "--convert-to", "pdf",
+                "--outdir", os.path.dirname(output_path),
+                input_path
+            ]
+            
+            # 执行命令
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+            
+            # 检查是否成功
+            if result.returncode != 0:
+                print(f"LibreOffice转换失败: {result.stderr.decode()}")
+                return False
+            
+            # 检查输出文件是否存在
+            expected_output = os.path.join(
+                os.path.dirname(output_path),
+                os.path.splitext(os.path.basename(input_path))[0] + ".pdf"
+            )
+            
+            if os.path.exists(expected_output) and expected_output != output_path:
+                # 如果输出文件名与预期不同，重命名
+                shutil.move(expected_output, output_path)
+            
+            return os.path.exists(output_path)
+        except Exception as e:
+            print(f"LibreOffice转换出错: {e}")
+            return False
+    
+    def _convert_ppt_via_com(self, ppt_path, progress_callback=None):
+        """
+        使用COM接口将PPT转换为图像列表
+        
+        Args:
+            ppt_path (str): PPT文件路径
+            progress_callback (callable, optional): 进度回调函数
+            
+        Returns:
+            list: 图像列表
         """
         slide_images = []
         
-        # 为每个幻灯片创建一个临时文件目录
-        temp_slides_dir = os.path.join(self.temp_dir if self.temp_dir else tempfile.gettempdir(), "mock_slides")
-        os.makedirs(temp_slides_dir, exist_ok=True)
+        try:
+            # 报告进度：准备阶段
+            if progress_callback:
+                progress_callback(0, 100, "正在初始化PPT转换...")
+                
+            # 初始化COM对象
+            powerpoint = comtypes.client.CreateObject("Powerpoint.Application")
+            powerpoint.Visible = True
+            
+            # 报告进度：正在打开PPT
+            if progress_callback:
+                progress_callback(10, 100, "正在打开PPT文件...")
+                
+            presentation = powerpoint.Presentations.Open(ppt_path)
+            
+            # 获取幻灯片数量
+            slide_count = presentation.Slides.Count
+            
+            # 如果没有幻灯片，则返回空列表
+            if slide_count == 0:
+                powerpoint.Quit()
+                return []
+            
+            # 报告进度：开始导出
+            if progress_callback:
+                progress_callback(20, 100, f"开始导出 {slide_count} 张幻灯片...")
+            
+            # 创建临时目录存放图像
+            temp_dir = tempfile.mkdtemp(dir=self.temp_dir)
+            
+            # 导出PPT为图片
+            for i in range(1, slide_count + 1):
+                # 创建临时文件路径
+                slide_path = os.path.join(temp_dir, f"slide_{i}.png")
+                
+                try:
+                    # 导出当前幻灯片为图片
+                    slide = presentation.Slides.Item(i)
+                    slide.Export(slide_path, "PNG")
+                    
+                    # 读取导出的图像
+                    image = Image.open(slide_path)
+                    slide_images.append(image)
+                    
+                    # 报告进度
+                    if progress_callback:
+                        progress_callback(20 + (i * 70) // slide_count, 100, 
+                                        f"已处理 {i}/{slide_count} 张幻灯片...")
+                except Exception as e:
+                    print(f"导出幻灯片 {i} 时出错: {e}")
+                    continue
+            
+            # 报告进度：完成
+            if progress_callback:
+                progress_callback(100, 100, "PPT处理完成")
+            
+            # 关闭PPT
+            presentation.Close()
+            powerpoint.Quit()
+            
+            return slide_images
         
-        for i in range(count):
-            img_path = os.path.join(temp_slides_dir, f"slide_{i}.png")
-            self.temp_files.append(img_path)  # 跟踪临时文件
-            
-            # 创建一个模拟的幻灯片图像 - 使用类型忽略解决PIL类型兼容问题
-            img = Image.new('RGB', (1280, 720), color=(255, 255, 255))  # type: ignore
-            d = ImageDraw.Draw(img)
-            
-            # 绘制边框
-            d.rectangle([20, 20, 1260, 700], outline='black', width=2)
-            
-            # 试图加载一个字体，如果失败则使用默认
-            try:
-                font = ImageFont.truetype("arial.ttf", 48)
-            except IOError:
-                font = ImageFont.load_default()
-            
-            # 写入幻灯片编号和模拟状态
-            text_pos = (640, 360)
-            d.text(text_pos, f"幻灯片 {i+1} (模拟)", fill='black', font=font, anchor="mm")
-            
-            # 保存为临时文件
-            img.save(img_path)
-            
-            # 加载保存的图像并添加到列表
-            slide_image = Image.open(img_path)
-            slide_images.append(slide_image)
-            
-        return slide_images
+        except Exception as e:
+            print(f"使用COM转换PPT时出错: {e}")
+            return []
     
-    def generate_pdf(self, slide_images, output_path, layout_result, config):
+    def _convert_pdf_to_images(self, pdf_path, progress_callback=None):
+        """
+        将PDF转换为图像列表
+        
+        Args:
+            pdf_path (str): PDF文件路径
+            progress_callback (callable, optional): 进度回调函数
+            
+        Returns:
+            list: 图像列表
+        """
+        from pdf2image import convert_from_path
+        
+        slide_images = []
+        
+        try:
+            # 报告进度：开始准备
+            if progress_callback:
+                progress_callback(0, 100, "正在从PDF提取图像...")
+            
+            # 转换PDF为图像
+            images = convert_from_path(pdf_path)
+            
+            # 报告进度：PDF加载完成
+            if progress_callback:
+                progress_callback(20, 100, f"已加载PDF，共 {len(images)} 页")
+            
+            # 处理每个页面
+            for i, image in enumerate(images):
+                # 更频繁地报告进度
+                if progress_callback:
+                    progress_callback(20 + (i + 1) * 70 // len(images), 100, 
+                                    f"正在处理图像 {i+1}/{len(images)}...")
+                
+                slide_images.append(image)
+            
+            # 报告进度：完成
+            if progress_callback:
+                progress_callback(100, 100, "图像提取完成")
+            
+            return slide_images
+        
+        except Exception as e:
+            print(f"转换PDF为图像时出错: {e}")
+            return []
+    
+    def generate_pdf(self, slide_images, output_path, layout_result, config, progress_callback=None):
         """
         根据布局将PPT图像生成为PDF
         
@@ -286,6 +362,7 @@ class PPTProcessor:
             output_path: 输出PDF文件路径
             layout_result: 布局计算结果
             config: 布局配置
+            progress_callback (callable, optional): 进度回调函数
             
         Returns:
             布尔值，表示是否成功
@@ -297,6 +374,10 @@ class PPTProcessor:
             if not slide_images or len(slide_images) == 0:
                 print("没有幻灯片可处理")
                 return False
+            
+            # 报告进度：开始
+            if progress_callback:
+                progress_callback(0, 100, "准备生成PDF...")
                 
             # 使用布局计算结果中的页面尺寸（包含方向信息）
             page_width_mm = layout_result["page_width"]
@@ -309,6 +390,10 @@ class PPTProcessor:
             output_dir = os.path.dirname(output_path)
             if output_dir and not os.path.exists(output_dir):
                 os.makedirs(output_dir)
+            
+            # 报告进度：准备字体
+            if progress_callback:
+                progress_callback(10, 100, "正在准备字体...")
             
             # 注册中文字体用于页码显示
             chinese_font_name = "Helvetica"  # 默认字体
@@ -363,14 +448,24 @@ class PPTProcessor:
             # 处理每一页
             page_count = 0
             slide_count = len(slide_images)
+            total_pages = (slide_count + items_per_page - 1) // items_per_page
             
-            for page_idx in range((slide_count + items_per_page - 1) // items_per_page):
+            # 报告进度：开始生成页面
+            if progress_callback:
+                progress_callback(20, 100, f"开始生成 {total_pages} 页PDF...")
+
+            for page_idx in range(total_pages):
                 if page_idx > 0:
                     # 创建新页面
                     c.showPage()
                 
                 page_count += 1
                 
+                # 报告当前页面进度
+                if progress_callback:
+                    progress_callback(20 + (page_idx * 70) // total_pages, 100,
+                                    f"正在生成第 {page_idx + 1}/{total_pages} 页...")
+
                 # 处理当前页的每个位置
                 for pos in range(items_per_page):
                     slide_idx = page_idx * items_per_page + pos
@@ -427,12 +522,23 @@ class PPTProcessor:
                     page_number_y = margin_bottom_mm * mm 
                     c.drawString(page_number_x, page_number_y, page_number_text)
             
+            # 报告进度：正在保存
+            if progress_callback:
+                progress_callback(95, 100, "正在保存PDF文件...")
+            
             # 保存PDF
             c.save()
+            
+            # 报告进度：完成
+            if progress_callback:
+                progress_callback(100, 100, "PDF生成完成")
+            
             return True
         
         except Exception as e:
             print(f"生成PDF时发生错误: {e}")
+            if progress_callback:
+                progress_callback(100, 100, f"错误: {e}")
             return False
         finally:
             # 清理本次操作的临时文件
@@ -443,7 +549,7 @@ class PPTProcessor:
                 except Exception as e:
                     print(f"清理临时文件失败: {temp_file} - {e}")
     
-    def generate_pdf_with_index(self, markdown_text, content_pdf_path, final_output_path):
+    def generate_pdf_with_index(self, markdown_text, content_pdf_path, final_output_path, progress_callback=None):
         """
         将Markdown索引和内容PDF合并
         
@@ -451,6 +557,7 @@ class PPTProcessor:
             markdown_text (str): Markdown格式的索引
             content_pdf_path (str): 内容PDF的路径
             final_output_path (str): 最终输出路径
+            progress_callback (callable, optional): 进度回调函数
             
         Returns:
             bool: 是否成功
@@ -460,11 +567,19 @@ class PPTProcessor:
         os.close(index_fd)
 
         try:
+            # 报告进度：开始准备
+            if progress_callback:
+                progress_callback(0, 100, "正在准备生成索引PDF...")
+            
             # 获取内容PDF的页面方向和尺寸
             content_pdf_config = self._get_pdf_config(content_pdf_path)
             if not content_pdf_config:
                 print("警告：无法获取内容PDF的配置信息，将使用默认A4尺寸")
                 content_pdf_config = {"pagesize": A4}
+            
+            # 报告进度：Markdown处理
+            if progress_callback:
+                progress_callback(20, 100, "正在将Markdown转换为PDF...")
                 
             # 1. 将Markdown转换为PDF，使用相同的页面尺寸
             result = self._markdown_to_pdf(markdown_text, index_pdf_path, content_pdf_config)
@@ -472,6 +587,10 @@ class PPTProcessor:
                 print("转换Markdown到PDF失败")
                 return False
 
+            # 报告进度：合并PDF
+            if progress_callback:
+                progress_callback(60, 100, "正在合并索引与内容PDF...")
+                
             # 2. 合并PDF
             try:
                 merger = PdfWriter()
@@ -486,9 +605,17 @@ class PPTProcessor:
                     content_pdf = PdfReader(f)
                     merger.append(content_pdf)
 
+                # 报告进度：写入最终PDF
+                if progress_callback:
+                    progress_callback(80, 100, "正在写入最终PDF文件...")
+                    
                 # 写入最终文件
                 with open(final_output_path, "wb") as f:
                     merger.write(f)
+                
+                # 报告进度：完成
+                if progress_callback:
+                    progress_callback(100, 100, "PDF生成完成")
                 
                 merger.close()
                 return True
