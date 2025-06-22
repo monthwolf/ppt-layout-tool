@@ -11,6 +11,8 @@
 ![导出文件](./pictures/4.png)
 ![导出成功](./pictures/4-1.png)
 ![AI索引](./pictures/5.png)
+![生成效果](https://github.com/user-attachments/assets/cd13484d-7963-4dac-8cbd-a8b0e7870869)
+
 
 ## 功能
 
