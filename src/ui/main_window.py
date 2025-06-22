@@ -1,17 +1,16 @@
 import os
 import sys
-import time
 from pathlib import Path
-from collections import defaultdict
+import requests
+from packaging import version
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
                            QPushButton, QSpinBox, QLabel, QFileDialog, 
                            QScrollArea, QGroupBox, QDoubleSpinBox, QMessageBox,
-                           QSizePolicy, QFrame, QGridLayout, QProgressBar,
-                           QStatusBar, QToolButton, QTabWidget, QWizard, 
-                           QWizardPage, QStackedWidget, QRadioButton, QButtonGroup,
+                           QSizePolicy, QFrame, QGridLayout,
+                           QStatusBar, QStackedWidget, QRadioButton, QButtonGroup,
                            QCheckBox, QTextEdit, QApplication)
-from PyQt6.QtCore import Qt, QRectF, QSize, QThread, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint, QParallelAnimationGroup, QByteArray, QRect, QSettings, QUrl, QTimer
-from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon, QMovie, QPainterPath, QAction, QDesktopServices
+from PyQt6.QtCore import Qt, QRectF, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QRect, QSettings, QUrl, QTimer
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon, QAction, QDesktopServices
 from PyQt6.QtSvg import QSvgRenderer
 
 from pptx import Presentation
@@ -24,6 +23,10 @@ from src.ui.styles import STYLESHEET, COLORS, WELCOME_TEXT, STEPS_GUIDE
 from src.ui.loading_overlay import LoadingOverlay
 from src.ui.worker import Worker
 from src.ui.spinner_widget import SpinnerWidget
+
+# 从环境变量读取版本号，如果未设置则为开发版
+CURRENT_VERSION = os.environ.get("APP_VERSION", "dev")
+GITHUB_REPO = "monthwolf/ppt-layout-tool" # 请替换为您的GitHub仓库
 
 def get_resource_path(relative_path):
     """一个健壮的函数，用于在开发和打包环境中都能找到资源文件。"""
@@ -205,13 +208,14 @@ class StepIndicator(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PPT 布局工具")
+        self.setWindowTitle(f"PPT 布局工具 v{CURRENT_VERSION}")
         self.setMinimumSize(1100, 800)
         self.setWindowIcon(QIcon(get_resource_path("resources/app_icon.svg")))
 
         self.ppt_processor = PPTProcessor()
         self.layout_calculator = LayoutCalculator()
         
+        self.content_pdf_path = None
         self.current_ppt_path = None
         self.slide_images = []
         self.layout_config = {
@@ -233,43 +237,61 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("准备就绪")
 
-        # 检查是否首次启动
-        QTimer.singleShot(100, self.check_first_launch)
+        # 启动时检查
+        QTimer.singleShot(100, self.initial_checks)
+
+    def initial_checks(self):
+        """执行启动时的检查，如更新检查和首次启动欢迎"""
+        # 启动时静默检查更新
+        self.check_for_updates(silent=True)
 
     def check_first_launch(self):
+        """检查是否首次启动，如果是则显示关于对话框"""
         settings = QSettings("monthwolf", "PPTLayoutTool")
-        if settings.value("firstLaunch", True, type=bool):
+        if settings.value("showAboutOnLaunch", True, type=bool):
             self.show_about_dialog()
-            settings.setValue("firstLaunch", False)
             
     def show_about_dialog(self):
-        about_text = """
-            <h2 style="font-size: 18px; color: #333;">PPT 布局工具 v1.0</h2>
+        """显示关于对话框"""
+        # 创建一个自定义的QMessageBox
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("关于 PPT 布局工具")
+        
+        about_text = f"""
+            <h2 style="font-size: 18px; color: #333;">PPT 布局工具 v{CURRENT_VERSION}</h2>
             <p style="font-size: 13px; color: #555;">一款现代、高效的PPT排版与索引生成工具。</p>
             <p style="font-size: 13px; color: #555;">作者：<b>monthwolf</b></p>
             <p style="font-size: 13px; color: #555;">
-                联系方式：<a href='mailto:1369755540@qq.com' style="color: #4A90E2; text-decoration: none;">1369755540@qq.com</a>
-            </p>
-            <hr style="border: none; border-top: 1px solid #EAEAEA; margin: 12px 0;">
-            <p style="font-size: 12px; color: #777;">
-                <a href='https://github.com/monthwolf/ppt-layout-tool' style="color: #4A90E2; text-decoration: none;">项目源码</a> &nbsp;|&nbsp; 
-                <a href='https://github.com/monthwolf/ppt-layout-tool/issues' style="color: #4A90E2; text-decoration: none;">报告问题</a> &nbsp;|&nbsp;
-                <a href='https://github.com/monthwolf' style="color: #4A90E2; text-decoration: none;">作者主页</a>
+                <a href="https://github.com/{GITHUB_REPO}" style="color: #0078D7;">访问 GitHub 仓库</a> | 
+                <a href="https://github.com/{GITHUB_REPO}/releases" style="color: #0078D7;">查看所有版本</a>
             </p>
         """
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("关于")
-        msg_box.setTextFormat(Qt.TextFormat.RichText)
         msg_box.setText(about_text)
-        msg_box.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        msg_box.setIcon(QMessageBox.Icon.Information)
+
+        # 添加"不再显示"复选框
+        cb = QCheckBox("启动时不再显示此对话框")
+        settings = QSettings("monthwolf", "PPTLayoutTool")
+        show_on_launch = settings.value("showAboutOnLaunch", True, type=bool)
+        cb.setChecked(not show_on_launch)
+        msg_box.setCheckBox(cb)
+        
         msg_box.exec()
 
+        # 根据复选框状态更新设置
+        settings.setValue("showAboutOnLaunch", not cb.isChecked())
+            
     def init_menu(self):
         menu_bar = self.menuBar()
         help_menu = menu_bar.addMenu("帮助")
+
         about_action = QAction("关于", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
+        
+        update_action = QAction("检查更新", self)
+        update_action.triggered.connect(lambda: self.check_for_updates(silent=False))
+        help_menu.addAction(update_action)
 
     def init_loading_overlay(self):
         self.loading_overlay = LoadingOverlay(self)
@@ -542,9 +564,6 @@ class MainWindow(QMainWindow):
         preview_layout.addWidget(scroll_area)
         
         layout.addWidget(preview_group)
-        
-        # 指示当前是否已经生成过预览的标志
-        self.preview_generated = False
         
         # 添加到堆叠式部件
         self.stacked_widget.addWidget(page)
@@ -1217,4 +1236,96 @@ class MainWindow(QMainWindow):
             event.accept()
         except Exception as e:
             print(f"关闭时发生错误: {e}")
-            event.accept() 
+            event.accept()
+
+    def check_for_updates(self, silent=False):
+        """在工作线程中检查GitHub上的新版本"""
+        if GITHUB_REPO == "YOUR_USERNAME/YOUR_REPOSITORY" or CURRENT_VERSION == "dev":
+            if not silent:
+                if CURRENT_VERSION == "dev":
+                    QMessageBox.information(self, "开发版", "您正在运行开发版本，已跳过更新检查。")
+                else:
+                    QMessageBox.warning(self, "未配置", "GitHub仓库地址未配置，无法检查更新。")
+            else:
+                self.check_first_launch()
+            return
+
+        self.status_bar.showMessage("正在检查更新...")
+        # 创建一个Worker来执行网络请求
+        self.update_worker = Worker(self._get_latest_release_info)
+        self.update_worker.finished.connect(lambda release_info: self._on_update_check_finished(release_info, silent))
+        self.update_worker.error.connect(lambda e: self._on_update_check_error(e, silent))
+        self.update_worker.start()
+
+    def _get_latest_release_info(self):
+        """从GitHub API获取最新发布信息"""
+        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        response = requests.get(api_url, timeout=10)
+        response.raise_for_status()
+        return response.json()
+
+    def _on_update_check_finished(self, release_info, silent):
+        """更新检查完成后的回调"""
+        # 如果是开发版，不进行版本比较
+        if CURRENT_VERSION == "dev":
+            if not silent:
+                QMessageBox.information(self, "开发版", "您正在运行开发版本，已跳过更新检查。")
+            else:
+                self.check_first_launch()
+            return
+
+        latest_version_str = release_info.get("tag_name", "v0.0.0").lstrip('v')
+        
+        try:
+            current_v = version.parse(CURRENT_VERSION)
+            latest_v = version.parse(latest_version_str)
+
+            if latest_v > current_v:
+                self.show_update_dialog(release_info)
+            else:
+                if not silent:
+                    QMessageBox.information(self, "检查更新", "您当前使用的已是最新版本。")
+                else:
+                    self.check_first_launch()
+        except version.InvalidVersion:
+            if not silent:
+                QMessageBox.warning(self, "版本错误", "无法解析版本号，已跳过更新检查。")
+            else:
+                self.check_first_launch()
+
+    def _on_update_check_error(self, exception, silent):
+        """更新检查失败时的回调"""
+        print(f"检查更新失败: {exception}")
+        if not silent:
+            QMessageBox.warning(self, "检查更新", "无法连接到GitHub检查更新，请检查您的网络连接。")
+        else:
+            # 如果检查失败，同样继续显示关于对话框
+            self.check_first_launch()
+            
+    def show_update_dialog(self, release_info):
+        """显示更新提示对话框"""
+        latest_version = release_info.get("tag_name", "v0.0.0")
+        release_notes = release_info.get("body", "无版本说明。").replace('\n', '<br>')
+        release_url = release_info.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("发现新版本！")
+        msg_box.setIcon(QMessageBox.Icon.Information)
+        
+        update_text = f"""
+            <h3 style="font-size: 16px;">发现新版本: {latest_version}</h3>
+            <p style="font-size: 13px;">建议您更新到最新版本以获得最佳体验。</p>
+            <p style="font-size: 14px; font-weight: bold;">更新内容:</p>
+            <div style="font-size: 12px; background-color: #f0f0f0; border-radius: 5px; padding: 10px;">
+                {release_notes}
+            </div>
+        """
+        msg_box.setText(update_text)
+        
+        update_btn = msg_box.addButton("立即更新", QMessageBox.ButtonRole.ActionRole)
+        msg_box.addButton("稍后提醒", QMessageBox.ButtonRole.RejectRole)
+        
+        msg_box.exec()
+        
+        if msg_box.clickedButton() == update_btn:
+            QDesktopServices.openUrl(QUrl(release_url)) 

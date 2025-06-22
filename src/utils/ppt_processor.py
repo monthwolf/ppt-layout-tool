@@ -1,25 +1,15 @@
 import os
-import io
 import sys
 import tempfile
 import subprocess
-import ctypes
 import comtypes.client  # type: ignore
 import shutil
 import atexit
-from pathlib import Path
-import time
-import re
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT
 from PyPDF2 import PdfWriter, PdfReader
-import markdown_it
-from reportlab.lib import fonts
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 

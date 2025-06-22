@@ -1,7 +1,5 @@
-import math
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFrame, QLabel, QProgressBar
-from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, QByteArray
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve
 
 from .spinner_widget import SpinnerWidget
 

@@ -26,7 +26,6 @@ STYLESHEET = f"""
     QGroupBox {{
         background-color: {COLORS['surface']};
         border: 1px solid {COLORS['divider']};
-        overflow-y: scroll;
         border-radius: 8px;
         font-size: 14px;
         font-weight: bold;
@@ -49,7 +48,6 @@ STYLESHEET = f"""
         padding: 10px 15px;
         font-size: 13px;
         color: {COLORS['text_primary']};
-        transition: all 0.3s ease;
     }}
     
     QPushButton:hover {{
