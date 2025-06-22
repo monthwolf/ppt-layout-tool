@@ -23,10 +23,9 @@ from src.ui.styles import STYLESHEET, COLORS, WELCOME_TEXT, STEPS_GUIDE
 from src.ui.loading_overlay import LoadingOverlay
 from src.ui.worker import Worker
 from src.ui.spinner_widget import SpinnerWidget
+from src._version import __version__ as CURRENT_VERSION
 
-# 从环境变量读取版本号，如果未设置则为开发版
-CURRENT_VERSION = os.environ.get("APP_VERSION", "dev")
-GITHUB_REPO = "monthwolf/ppt-layout-tool" # 请替换为您的GitHub仓库
+GITHUB_REPO = "monthwolf/ppt-layout-tool" # 替换为自己GitHub仓库
 
 def get_resource_path(relative_path):
     """一个健壮的函数，用于在开发和打包环境中都能找到资源文件。"""
