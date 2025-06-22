@@ -26,6 +26,7 @@ STYLESHEET = f"""
     QGroupBox {{
         background-color: {COLORS['surface']};
         border: 1px solid {COLORS['divider']};
+        overflow-y: scroll;
         border-radius: 8px;
         font-size: 14px;
         font-weight: bold;
@@ -60,6 +61,12 @@ STYLESHEET = f"""
         background-color: {COLORS['divider']};
     }}
     
+    QPushButton:disabled {{
+        background-color: #F8F8F8;
+        color: #BBBBBB;
+        border-color: #E0E0E0;
+    }}
+    
     QPushButton#accentButton {{
         background-color: {COLORS['primary']};
         color: white;
@@ -69,6 +76,12 @@ STYLESHEET = f"""
     
     QPushButton#accentButton:hover {{
         background-color: {COLORS['primary_dark']};
+    }}
+    
+    QPushButton#accentButton:disabled {{
+        background-color: #A0C0E0;
+        color: white;
+        opacity: 0.7;
     }}
 
     QLabel {{

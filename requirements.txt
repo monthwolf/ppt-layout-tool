@@ -1,9 +1,14 @@
 PyQt6==6.4.2
 pyqt6-tools==6.4.2.3.3
-python-pptx==0.6.21
-comtypes==1.1.14
+pypiwin32==223
 Pillow==9.5.0
+python-pptx==0.6.21
+PyPDF2==3.0.1
 reportlab==3.6.12
+svglib==1.5.1
+pyinstaller==5.13.2
+comtypes==1.1.14
 qt-material==2.14
 darkdetect==0.8.0
-PyPDF2 
+markdown-it-py==3.0.0
+pygments==2.17.2 

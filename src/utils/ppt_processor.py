@@ -12,12 +12,16 @@ import time
 import re
 from PIL import Image, ImageDraw, ImageFont
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
 from PyPDF2 import PdfWriter, PdfReader
+import markdown_it
+from reportlab.lib import fonts
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 class PPTProcessor:
     """
@@ -306,6 +310,34 @@ class PPTProcessor:
             if output_dir and not os.path.exists(output_dir):
                 os.makedirs(output_dir)
             
+            # 注册中文字体用于页码显示
+            chinese_font_name = "Helvetica"  # 默认字体
+            try:
+                # 首先尝试使用项目自带的Source Han Sans字体
+                source_han_sans_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                                  'resources', 'SourceHanSans.ttf')
+                
+                if os.path.exists(source_han_sans_path):
+                    chinese_font_name = "SourceHanSans"
+                    pdfmetrics.registerFont(TTFont(chinese_font_name, source_han_sans_path))
+                    print(f"已注册内置中文字体用于页码显示: {chinese_font_name}")
+                else:
+                    # 尝试使用系统中文字体
+                    font_paths = [
+                        "C:/Windows/Fonts/simhei.ttf",
+                        "C:/Windows/Fonts/msyh.ttc",
+                        "/System/Library/Fonts/PingFang.ttc"
+                    ]
+                    for path in font_paths:
+                        if os.path.exists(path):
+                            font_name = "SimHei" if "simhei" in path.lower() else "ChineseFont"
+                            pdfmetrics.registerFont(TTFont(font_name, path))
+                            chinese_font_name = font_name
+                            print(f"已注册系统字体用于页码显示: {chinese_font_name}")
+                            break
+            except Exception as e:
+                print(f"注册中文字体失败: {e}")
+            
             # 创建PDF画布
             c = canvas.Canvas(output_path, pagesize=page_size)
             
@@ -376,7 +408,7 @@ class PPTProcessor:
                         
                         # 添加PPT定位页码标记
                         if show_ppt_numbers:
-                            c.setFont("Helvetica", 8)
+                            c.setFont(chinese_font_name, 8)
                             label = f"{page_idx+1}-{pos+1}"
                             # 放在PPT的左下角
                             c.drawString(x, y - 10, label)
@@ -387,11 +419,13 @@ class PPTProcessor:
                 
                 # 添加纸张页码（在页面右下角）
                 if show_page_numbers:
-                    c.setFont("Helvetica", 10)
+                    c.setFont(chinese_font_name, 10)
+                    # 使用中文页码格式
+                    page_number_text = f"第 {page_idx+1} 页"
                     # 计算页码位置在右下角
-                    page_number_x = page_width_mm * mm - margin_right_mm * mm - 15
+                    page_number_x = page_width_mm * mm - margin_right_mm * mm - 25  # 增加空间以容纳中文
                     page_number_y = margin_bottom_mm * mm 
-                    c.drawString(page_number_x, page_number_y, f"{page_idx+1}")
+                    c.drawString(page_number_x, page_number_y, page_number_text)
             
             # 保存PDF
             c.save()
@@ -426,73 +460,221 @@ class PPTProcessor:
         os.close(index_fd)
 
         try:
-            # 1. 将Markdown转换为PDF
-            self._markdown_to_pdf(markdown_text, index_pdf_path)
+            # 获取内容PDF的页面方向和尺寸
+            content_pdf_config = self._get_pdf_config(content_pdf_path)
+            if not content_pdf_config:
+                print("警告：无法获取内容PDF的配置信息，将使用默认A4尺寸")
+                content_pdf_config = {"pagesize": A4}
+                
+            # 1. 将Markdown转换为PDF，使用相同的页面尺寸
+            result = self._markdown_to_pdf(markdown_text, index_pdf_path, content_pdf_config)
+            if not result:
+                print("转换Markdown到PDF失败")
+                return False
 
             # 2. 合并PDF
-            merger = PdfWriter()
-            
-            # 首先添加索引PDF
-            with open(index_pdf_path, "rb") as f:
-                index_pdf = PdfReader(f)
-                merger.append(index_pdf)
+            try:
+                merger = PdfWriter()
+                
+                # 首先添加索引PDF
+                with open(index_pdf_path, "rb") as f:
+                    index_pdf = PdfReader(f)
+                    merger.append(index_pdf)
 
-            # 然后添加内容PDF
-            with open(content_pdf_path, "rb") as f:
-                content_pdf = PdfReader(f)
-                merger.append(content_pdf)
+                # 然后添加内容PDF
+                with open(content_pdf_path, "rb") as f:
+                    content_pdf = PdfReader(f)
+                    merger.append(content_pdf)
 
-            # 写入最终文件
-            with open(final_output_path, "wb") as f:
-                merger.write(f)
-            
-            merger.close()
-            return True
+                # 写入最终文件
+                with open(final_output_path, "wb") as f:
+                    merger.write(f)
+                
+                merger.close()
+                return True
+            except Exception as e:
+                print(f"合并PDF时出错: {e}")
+                return False
 
         except Exception as e:
-            print(f"合并PDF时出错: {e}")
+            print(f"生成索引PDF时出错: {e}")
             return False
         finally:
             # 清理临时的索引PDF
             if os.path.exists(index_pdf_path):
                 os.unlink(index_pdf_path)
+    
+    def _get_pdf_config(self, pdf_path):
+        """
+        获取PDF的配置信息，包括页面尺寸和方向
+        
+        Args:
+            pdf_path (str): PDF文件路径
+            
+        Returns:
+            dict: 包含pagesize等信息的配置字典
+        """
+        try:
+            with open(pdf_path, "rb") as f:
+                pdf = PdfReader(f)
+                if len(pdf.pages) > 0:
+                    page = pdf.pages[0]
+                    # 获取页面尺寸（以点为单位）
+                    width = float(page.mediabox.width)
+                    height = float(page.mediabox.height)
+                    
+                    # 转换为mm
+                    width_mm = width * 0.352778
+                    height_mm = height * 0.352778
+                    
+                    # 判断页面方向
+                    is_landscape = width > height
+                    
+                    # 创建页面尺寸元组
+                    if is_landscape:
+                        pagesize = landscape(A4) if abs(width_mm - 297) < 5 and abs(height_mm - 210) < 5 else (width, height)
+                    else:
+                        pagesize = A4 if abs(width_mm - 210) < 5 and abs(height_mm - 297) < 5 else (width, height)
+                    
+                    return {
+                        "pagesize": pagesize,
+                        "is_landscape": is_landscape,
+                        "width": width,
+                        "height": height
+                    }
+            
+            return None
+        except Exception as e:
+            print(f"获取PDF配置时出错: {e}")
+            return None
 
-    def _markdown_to_pdf(self, markdown_text, output_path):
+    def _markdown_to_pdf(self, markdown_text, output_path, content_pdf_config=None):
         """
-        一个简单的Markdown到PDF转换器
-        支持 #, ##, ### 标题, - 列表项, 和普通段落
+        将Markdown文本转换为PDF文件
+        
+        Args:
+            markdown_text (str): Markdown文本
+            output_path (str): 输出PDF路径
+            content_pdf_config (dict, optional): 内容PDF的配置，包括pagesize等信息
         """
-        doc = SimpleDocTemplate(output_path, pagesize=A4)
+        # 注册中文字体
+        try:
+            # 首先尝试使用项目自带的Source Han Sans字体
+            source_han_sans_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                               'resources', 'SourceHanSans.ttf')
+            
+            if os.path.exists(source_han_sans_path):
+                chinese_font_name = "SourceHanSans"
+                pdfmetrics.registerFont(TTFont(chinese_font_name, source_han_sans_path))
+                print(f"已注册内置中文字体: {chinese_font_name}")
+            else:
+                # 如果内置字体不可用，尝试使用系统字体
+                font_paths = [
+                    # Windows 中文字体路径
+                    "C:/Windows/Fonts/simhei.ttf",           # 黑体
+                    "C:/Windows/Fonts/simsun.ttc",           # 宋体
+                    "C:/Windows/Fonts/simkai.ttf",           # 楷体
+                    "C:/Windows/Fonts/msyh.ttc",             # 微软雅黑
+                    # Mac OS 中文字体路径
+                    "/System/Library/Fonts/PingFang.ttc",    # 苹方
+                    # Linux 中文字体路径
+                    "/usr/share/fonts/truetype/arphic/uming.ttc",
+                    "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc"
+                ]
+                
+                # 搜索系统中的字体文件
+                font_file = None
+                for path in font_paths:
+                    if os.path.exists(path):
+                        font_file = path
+                        break
+                
+                # 如果找到字体文件，则注册字体
+                if font_file:
+                    chinese_font_name = "SimHei" if "simhei" in font_file.lower() else "ChineseFont"
+                    pdfmetrics.registerFont(TTFont(chinese_font_name, font_file))
+                    print(f"已注册系统中文字体: {chinese_font_name} 从 {font_file}")
+                else:
+                    print("警告: 未找到合适的中文字体文件")
+                    chinese_font_name = "Helvetica"  # 回退到默认字体
+        except Exception as e:
+            print(f"注册中文字体时出错: {e}")
+            chinese_font_name = "Helvetica"
+
+        # 使用内容PDF的页面尺寸
+        pagesize = None
+        if content_pdf_config and "pagesize" in content_pdf_config:
+            pagesize = content_pdf_config["pagesize"]
+        else:
+            pagesize = A4  # 默认使用A4尺寸
+        
+        # 设置文档和样式
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        
+        doc = SimpleDocTemplate(output_path, pagesize=pagesize)
         styles = getSampleStyleSheet()
         
-        # 自定义样式
-        # 检查并添加自定义样式，避免与默认样式冲突
-        if 'H1' not in styles:
-            styles.add(ParagraphStyle(name='H1', fontSize=18, leading=22, spaceAfter=10, fontName='Helvetica-Bold'))
-        if 'H2' not in styles:
-            styles.add(ParagraphStyle(name='H2', fontSize=14, leading=18, spaceAfter=8, fontName='Helvetica-Bold'))
-        if 'H3' not in styles:
-            styles.add(ParagraphStyle(name='H3', fontSize=12, leading=16, spaceAfter=6, fontName='Helvetica-Bold'))
-        if 'CustomBullet' not in styles:
-            styles.add(ParagraphStyle(name='CustomBullet', leftIndent=20, firstLineIndent=0, spaceAfter=4, leading=14))
+        # 修改现有样式以支持中文，而不是添加新样式
+        styles['Title'].fontName = chinese_font_name
+        styles['Heading1'].fontName = chinese_font_name
+        styles['Heading2'].fontName = chinese_font_name
+        styles['Heading3'].fontName = chinese_font_name
+        styles['BodyText'].fontName = chinese_font_name
+        styles['Normal'].fontName = chinese_font_name
         
+        # 创建列表项样式（这个样式在默认样式表中可能不存在）
+        bullet_style = ParagraphStyle(
+            'ChineseBullet',
+            parent=styles['Normal'],
+            leftIndent=20,
+            fontName=chinese_font_name
+        )
+        
+        # 使用更简单的方法解析Markdown
+        # 先将markdown文本分割成段落
+        paragraphs = markdown_text.split('\n\n')
         story = []
-        lines = markdown_text.split('\n')
-
-        for line in lines:
-            line = line.strip()
-            if not line:
+        
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if not paragraph:
                 continue
-
-            if line.startswith('###'):
-                story.append(Paragraph(line.replace('###', '').strip(), styles.get('H3', styles['Normal'])))
-            elif line.startswith('##'):
-                story.append(Paragraph(line.replace('##', '').strip(), styles.get('H2', styles['Normal'])))
-            elif line.startswith('#'):
-                story.append(Paragraph(line.replace('#', '').strip(), styles.get('H1', styles['Normal'])))
-            elif line.startswith(('-', '*')):
-                story.append(Paragraph(line[1:].strip(), styles.get('CustomBullet', styles['Normal']), bulletText='•'))
-            else:
-                story.append(Paragraph(line, styles['Normal']))
+                
+            # 处理标题
+            if paragraph.startswith('#'):
+                heading_level = 0
+                while paragraph.startswith('#'):
+                    heading_level += 1
+                    paragraph = paragraph[1:]
+                paragraph = paragraph.strip()
+                
+                if heading_level == 1:
+                    story.append(Paragraph(paragraph, styles['Title']))
+                elif heading_level == 2:
+                    story.append(Paragraph(paragraph, styles['Heading1']))
+                elif heading_level == 3:
+                    story.append(Paragraph(paragraph, styles['Heading2']))
+                else:
+                    story.append(Paragraph(paragraph, styles['Heading3']))
             
+            # 处理列表
+            elif paragraph.startswith('* ') or paragraph.startswith('- '):
+                lines = paragraph.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('* ') or line.startswith('- '):
+                        line = line[2:].strip()
+                        story.append(Paragraph(line, bullet_style, bulletText='•'))
+            
+            # 普通段落
+            else:
+                story.append(Paragraph(paragraph, styles['BodyText']))
+                
+            # 添加间距
+            story.append(Spacer(1, 6))
+        
+        # 创建PDF
         doc.build(story)
+        print(f"Markdown已成功转换为PDF: {output_path}")
+        return True

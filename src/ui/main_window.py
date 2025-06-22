@@ -551,92 +551,108 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 20, 0, 0)
         layout.setSpacing(20)
         
-        # 导出设置区域
+        # 导出摘要区域
+        summary_group = QGroupBox("导出摘要")
+        summary_layout = QVBoxLayout(summary_group)
+        
+        self.export_summary = QLabel("准备导出...")
+        self.export_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        summary_layout.addWidget(self.export_summary)
+        
+        layout.addWidget(summary_group)
+        
+        # 导出区域
         export_group = QGroupBox("导出PDF")
         export_layout = QVBoxLayout(export_group)
         
-        # 导出摘要信息
-        self.export_summary = QLabel("导出摘要信息")
-        self.export_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        export_layout.addWidget(self.export_summary)
+        export_hint = QLabel("点击下方按钮导出排版后的PDF文件")
+        export_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        export_layout.addWidget(export_hint)
         
         # 导出按钮
         export_btn_layout = QHBoxLayout()
         export_btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.export_btn = QPushButton("仅导出内容PDF")
-        self.export_btn.setObjectName("accentButton")
-        self.export_btn.setMinimumHeight(40)
+        self.export_btn.setMinimumSize(180, 40)
         self.export_btn.clicked.connect(self.process_ppt)
         export_btn_layout.addWidget(self.export_btn)
         
         export_layout.addLayout(export_btn_layout)
         
+        # 导出结果
+        self.export_result = QLabel()
+        self.export_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        export_layout.addWidget(self.export_result)
+        
+        # AI索引按钮
+        self.ai_index_button = QPushButton("可选：添加AI索引 >")
+        self.ai_index_button.setObjectName("accentButton")
+        self.ai_index_button.setMinimumSize(180, 40)
+        self.ai_index_button.setVisible(False)  # 初始不可见
+        self.ai_index_button.clicked.connect(self.go_to_ai_step)  # 确保连接到正确的方法
+        export_layout.addWidget(self.ai_index_button, 0, Qt.AlignmentFlag.AlignCenter)
+        
         layout.addWidget(export_group)
         
-        # 导出结果区域
-        self.result_group = QGroupBox("导出结果")
-        result_layout = QVBoxLayout(self.result_group)
-        
-        self.export_result = QLabel("点击上方按钮开始导出")
-        self.export_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        result_layout.addWidget(self.export_result)
-        
-        layout.addWidget(self.result_group)
-        
-        # 添加AI索引选项
-        self.ai_index_button = QPushButton("可选：添加AI索引 >")
-        self.ai_index_button.clicked.connect(self.go_to_ai_step)
-        self.ai_index_button.setVisible(False) # 导出成功后显示
-        layout.addWidget(self.ai_index_button, 0, Qt.AlignmentFlag.AlignRight)
-        
-        # 添加到堆叠式部件
         self.stacked_widget.addWidget(page)
     
     def create_step5_page(self):
-        """创建步骤5：AI索引生成页面"""
+        """创建步骤5：AI索引页面（可选）"""
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 20, 0, 0)
-        layout.setSpacing(15)
-
-        # 1. 提示词生成区域
-        prompt_group = QGroupBox("1. 生成并复制提示词")
+        layout.setSpacing(20)
+        
+        # AI提示词区域
+        prompt_group = QGroupBox("AI提示词")
         prompt_layout = QVBoxLayout(prompt_group)
-
-        self.ai_prompt_text = QTextEdit()
-        self.ai_prompt_text.setReadOnly(True)
-        self.ai_prompt_text.setPlaceholderText("在这里生成给AI的提示词...")
-        self.ai_prompt_text.setMinimumHeight(150)
-        prompt_layout.addWidget(self.ai_prompt_text)
-
+        
+        prompt_hint = QLabel("以下是生成的AI提示词，您可以将其复制到ChatGPT或其他AI工具中以获取更好的索引内容。")
+        prompt_hint.setWordWrap(True)
+        prompt_layout.addWidget(prompt_hint)
+        
+        copy_btn_layout = QHBoxLayout()
+        copy_btn_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+        
         copy_prompt_btn = QPushButton("复制提示词")
         copy_prompt_btn.clicked.connect(self.copy_ai_prompt)
-        prompt_layout.addWidget(copy_prompt_btn, 0, Qt.AlignmentFlag.AlignRight)
+        copy_btn_layout.addWidget(copy_prompt_btn)
+        
+        prompt_layout.addLayout(copy_btn_layout)
+        
+        self.ai_prompt_text = QTextEdit()
+        self.ai_prompt_text.setReadOnly(True)
+        self.ai_prompt_text.setMinimumHeight(100)
+        prompt_layout.addWidget(self.ai_prompt_text)
         
         layout.addWidget(prompt_group)
-
-        # 2. 粘贴Markdown区域
-        markdown_group = QGroupBox("2. 粘贴AI返回的Markdown索引")
-        markdown_layout = QVBoxLayout(markdown_group)
-
+        
+        # AI生成的索引输入区域
+        ai_group = QGroupBox("AI生成的Markdown索引")
+        ai_layout = QVBoxLayout(ai_group)
+        
+        ai_hint = QLabel("请将AI生成的Markdown格式索引粘贴在此处：")
+        ai_layout.addWidget(ai_hint)
+        
         self.ai_markdown_input = QTextEdit()
-        self.ai_markdown_input.setPlaceholderText("请将AI生成的Markdown格式索引粘贴到此处。")
         self.ai_markdown_input.setMinimumHeight(200)
-        markdown_layout.addWidget(self.ai_markdown_input)
-
-        layout.addWidget(markdown_group)
-
-        # 3. 生成最终PDF
-        final_export_group = QGroupBox("3. 生成最终PDF")
+        self.ai_markdown_input.setAcceptRichText(False)
+        self.ai_markdown_input.textChanged.connect(self._update_export_button_state)
+        ai_layout.addWidget(self.ai_markdown_input)
+        
+        layout.addWidget(ai_group)
+        
+        # 最终导出区域
+        final_export_group = QGroupBox("导出带索引的PDF")
         final_export_layout = QVBoxLayout(final_export_group)
-
-        self.final_export_btn = QPushButton("合并生成带索引的PDF")
+        
+        self.final_export_btn = QPushButton("生成带索引的最终PDF")
         self.final_export_btn.setObjectName("accentButton")
         self.final_export_btn.setMinimumHeight(40)
-        self.final_export_btn.clicked.connect(self.generate_final_pdf_with_index)
+        self.final_export_btn.clicked.connect(self.export_final_pdf)
         final_export_layout.addWidget(self.final_export_btn)
-
+        
         self.final_export_result = QLabel()
         self.final_export_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
         final_export_layout.addWidget(self.final_export_result)
@@ -644,6 +660,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(final_export_group)
 
         self.stacked_widget.addWidget(page)
+    
+    def _update_export_button_state(self):
+        """根据Markdown输入框的内容更新导出按钮状态"""
+        has_content = bool(self.ai_markdown_input.toPlainText().strip())
+        self.final_export_btn.setEnabled(has_content)
     
     def show_welcome_screen(self):
         """显示欢迎界面"""
@@ -661,7 +682,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请先选择PPT文件！")
             return
         elif current_index == 3:
-            self.go_to_ai_step()
+            # 第四步结束后不能直接进入第五步，需要通过 AI索引按钮
             return
             
         if current_index < self.stacked_widget.count() - 1:
@@ -675,14 +696,25 @@ class MainWindow(QMainWindow):
                 self.refresh_preview()
             
             self.prev_btn.setEnabled(True)
-            self.next_btn.setEnabled(current_index < self.stacked_widget.count() - 2)
+            
+            # 更新下一步按钮状态
+            # 当到达第四步时，禁用下一步按钮（因为第五步是可选的）
+            is_last_regular_step = current_index >= self.stacked_widget.count() - 3  # 倒数第二个常规步骤
+            self.next_btn.setEnabled(not is_last_regular_step)
 
     def go_to_prev_step(self):
         current_index = self.stacked_widget.currentIndex()
         if current_index > 0:
             self.step_indicator.set_current_step(current_index - 1)
             self.stacked_widget.setCurrentIndex(current_index - 1)
-            self.next_btn.setEnabled(True)
+            
+            # 当从第五步返回时，启用下一步按钮
+            is_from_optional_step = current_index == self.stacked_widget.count() - 1
+            if is_from_optional_step:
+                self.next_btn.setEnabled(False)  # 因为回到第四步，第四步的下一步按钮不可用
+            else:
+                self.next_btn.setEnabled(True)
+            
             self.prev_btn.setEnabled(current_index > 1)
 
     def select_ppt_file(self):
@@ -732,16 +764,23 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("文件处理失败")
 
     def _on_task_error(self, exception):
+        """任务错误处理"""
         self.loading_overlay.hide()
-        error_message = f"发生了一个错误: \n{str(exception)}"
-        QMessageBox.critical(self, "操作失败", error_message)
-        print(f"工作线程错误: {exception}")
-        
-        # 重置所有可能被禁用的按钮
         self.export_btn.setEnabled(True)
-        if hasattr(self, 'final_export_btn'):
-            self.final_export_btn.setEnabled(True)
-        self.status_bar.showMessage("操作失败", 5000)
+        self.final_export_btn.setEnabled(True)  # 确保最终导出按钮也会被重新启用
+        
+        error_msg = str(exception)
+        print(f"任务执行出错: {error_msg}")
+        
+        # 根据当前所处的步骤更新UI反馈
+        current_index = self.stacked_widget.currentIndex()
+        
+        if current_index == 3:  # 导出页面
+            self.export_result.setText(f"<p style='color:{COLORS['error']};'><b>PDF导出失败!</b></p><p>错误: {error_msg}</p>")
+        elif current_index == 4:  # AI索引页面
+            self.final_export_result.setText(f"<p style='color:{COLORS['error']};'><b>PDF生成失败!</b></p><p>错误: {error_msg}</p>")
+        
+        QMessageBox.critical(self, "错误", f"操作失败：{error_msg}")
 
     def update_orientation(self):
         """更新页面方向设置"""
@@ -954,36 +993,44 @@ class MainWindow(QMainWindow):
             layout_result, 
             self.layout_config
         )
-        self.worker.finished.connect(self._on_content_pdf_generated)
+        self.worker.finished.connect(lambda success: self._on_content_pdf_generated(success, self.content_pdf_path))
         self.worker.error.connect(self._on_task_error)
         self.worker.start()
 
-    def _on_content_pdf_generated(self, success):
+    def _on_content_pdf_generated(self, success, output_path):
         """内容PDF生成完成后的回调"""
         self.loading_overlay.hide()
         self.export_btn.setEnabled(True)
 
         if success:
-            self.export_result.setText(f"<p style='color:{COLORS['success']};'><b>PDF导出成功!</b></p><p>文件保存在: {self.content_pdf_path}</p>")
-            self.status_bar.showMessage(f"PDF已成功导出: {os.path.basename(self.content_pdf_path)}")
-            QMessageBox.information(self, "导出成功", f"PDF已成功保存到:\n{self.content_pdf_path}")
+            self.export_result.setText(f"<p style='color:{COLORS['success']};'><b>PDF导出成功!</b></p><p>文件保存在: {output_path}</p>")
+            QMessageBox.information(self, "成功", f"PDF已保存到:\n{output_path}")
+            
+            # 显示AI索引按钮
             self.ai_index_button.setVisible(True)
         else:
-            self.export_result.setText(f"<p style='color:{COLORS['error']};'><b>导出失败!</b></p><p>请检查文件权限和磁盘空间</p>")
-            self.status_bar.showMessage("PDF导出失败")
-            QMessageBox.critical(self, "导出失败", "生成PDF时出错，请检查日志。")
+            self.export_result.setText(f"<p style='color:{COLORS['error']};'><b>PDF导出失败!</b></p><p>请检查日志获取详细信息。</p>")
+            QMessageBox.critical(self, "失败", "生成PDF时出错，请检查日志。")
 
     def go_to_ai_step(self):
-        """跳转到AI索引步骤"""
-        self.step_indicator.set_current_step(4)
-        self.stacked_widget.setCurrentIndex(4)
-        
-        # 生成并显示提示词
-        self._generate_ai_prompt()
-
-        # 更新按钮状态
-        self.next_btn.setEnabled(False)
-        self.prev_btn.setEnabled(True)
+        """跳转到AI索引步骤（第五步）"""
+        if self.content_pdf_path and os.path.exists(self.content_pdf_path):
+            self.step_indicator.set_current_step(4)  # 第五步的索引为4
+            self.stacked_widget.setCurrentIndex(4)
+            
+            # 生成并显示提示词
+            self._generate_ai_prompt()
+            
+            # 重置Markdown输入区域
+            self.ai_markdown_input.clear()
+            self.final_export_btn.setEnabled(False)
+            
+            # 更新按钮状态
+            self.prev_btn.setEnabled(True)
+            self.next_btn.setEnabled(False)
+        else:
+            QMessageBox.warning(self, "警告", "请先导出内容PDF！")
+            return
     
     def copy_ai_prompt(self):
         """复制AI提示词到剪贴板"""
@@ -1022,29 +1069,28 @@ class MainWindow(QMainWindow):
 """
         self.ai_prompt_text.setText(prompt.strip())
     
-    def generate_final_pdf_with_index(self):
-        """生成包含AI索引的最终PDF（异步）"""
-        markdown_text = self.ai_markdown_input.toPlainText()
-        if not markdown_text.strip():
-            QMessageBox.warning(self, "警告", "请输入AI生成的Markdown索引内容。")
-            return
-
-        if not hasattr(self, 'content_pdf_path') or not self.content_pdf_path:
-            QMessageBox.critical(self, "错误", "未找到已导出的内容PDF，请先完成第四步。")
+    def export_final_pdf(self):
+        """生成最终PDF（带索引）"""
+        if not self.content_pdf_path or not os.path.exists(self.content_pdf_path):
+            QMessageBox.warning(self, "警告", "请先生成内容PDF！")
             return
             
-        final_output_path, _ = QFileDialog.getSaveFileName(
-            self, "保存带索引的PDF文件", os.path.dirname(self.content_pdf_path), "PDF文件 (*.pdf)"
-        )
+        markdown_text = self.ai_markdown_input.toPlainText().strip()
+        if not markdown_text:
+            QMessageBox.warning(self, "警告", "请输入AI生成的Markdown索引内容！")
+            return
+            
+        final_output_path, _ = QFileDialog.getSaveFileName(self, "保存最终PDF文件", "", "PDF文件 (*.pdf)")
         if not final_output_path:
             return
-        
-        self.loading_overlay.set_text("正在生成索引并合并PDF...")
+            
+        self.loading_overlay.set_text("正在生成带索引的PDF...")
         self.loading_overlay.show()
         self.final_export_btn.setEnabled(False)
         
+        # 使用异步线程生成PDF
         self.worker = Worker(
-            self.ppt_processor.generate_pdf_with_index,
+            self.ppt_processor.generate_pdf_with_index, 
             markdown_text,
             self.content_pdf_path,
             final_output_path
@@ -1058,7 +1104,7 @@ class MainWindow(QMainWindow):
         self.loading_overlay.hide()
         self.final_export_btn.setEnabled(True)
 
-        if success:
+        if success and final_output_path:
             self.final_export_result.setText(f"<p style='color:{COLORS['success']};'><b>带索引的PDF导出成功!</b></p><p>文件保存在: {final_output_path}</p>")
             QMessageBox.information(self, "成功", f"带索引的最终PDF已保存到:\n{final_output_path}")
         else:
@@ -1073,7 +1119,8 @@ class MainWindow(QMainWindow):
         summary += f"<p>布局: 每页 <b>{layout_result['rows']}</b> 行 × <b>{layout_result['columns']}</b> 列</p>"
         summary += f"<p>预计页数: <b>{layout_result['pages_needed']}</b> 页PDF</p>"
         self.export_summary.setText(summary)
-        self.export_result.setText("点击下方按钮开始导出")
+        
+        # 隐藏AI索引按钮 - 仅在成功导出PDF后显示
         self.ai_index_button.setVisible(False)
     
     def closeEvent(self, event):
