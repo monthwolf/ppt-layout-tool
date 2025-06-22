@@ -1278,6 +1278,7 @@ class MainWindow(QMainWindow):
         try:
             current_v = version.parse(CURRENT_VERSION)
             latest_v = version.parse(latest_version_str)
+            # print(latest_v)
 
             if latest_v > current_v:
                 self.show_update_dialog(release_info)
