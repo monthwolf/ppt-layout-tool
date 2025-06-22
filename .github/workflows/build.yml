@@ -35,10 +35,10 @@ jobs:
           $VERSION = "${{ github.ref_name }}".substring(1)
           echo "Building version $VERSION"
           $EXE_NAME = "PPT-Layout-Tool-${{ github.ref_name }}"
-          pyinstaller --noconsole --onefile --windowed --name $EXE_NAME ^
-          --add-data "resources;resources" ^
-          --add-data "pictures;pictures" ^
-          --icon="resources/app_icon.ico" ^
+          pyinstaller --noconsole --onefile --windowed --name $EXE_NAME `
+          --add-data "resources;resources" `
+          --add-data "pictures;pictures" `
+          --icon="resources/app_icon.ico" `
           src/main.py
           echo "EXE_NAME=$EXE_NAME" >> $env:GITHUB_OUTPUT
         env:
