@@ -32,8 +32,6 @@ jobs:
       - name: Build executable
         id: build_exe
         run: |
-          $VERSION = "${{ github.ref_name }}".substring(1)
-          echo "Building version $VERSION"
           $EXE_NAME = "PPT-Layout-Tool-${{ github.ref_name }}"
           pyinstaller --noconsole --onefile --windowed --name $EXE_NAME `
           --add-data "resources;resources" `
@@ -43,7 +41,30 @@ jobs:
           echo "EXE_NAME=$EXE_NAME" >> $env:GITHUB_OUTPUT
         env:
           APP_VERSION: ${{ github.ref_name }}
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ppt-tool-executable
+          path: dist/
 
+  release:
+    runs-on: windows-latest
+    needs: build
+    
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: ppt-tool-executable
+          path: dist/
+
+      - name: Set executable name
+        id: set_exe_name
+        run: |
+          $EXE_NAME = "PPT-Layout-Tool-${{ github.ref_name }}"
+          echo "EXE_NAME=$EXE_NAME" >> $env:GITHUB_OUTPUT
+      
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -62,6 +83,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dist/${{ steps.build_exe.outputs.EXE_NAME }}.exe
-          asset_name: ${{ steps.build_exe.outputs.EXE_NAME }}.exe
+          asset_path: dist/${{ steps.set_exe_name.outputs.EXE_NAME }}.exe
+          asset_name: ${{ steps.set_exe_name.outputs.EXE_NAME }}.exe
           asset_content_type: application/vnd.microsoft.portable-executable 
