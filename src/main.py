@@ -4,6 +4,8 @@ import os
 # 添加当前目录的父目录到Python路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from src.version import VERSION as APP_VERSION
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QFont
 from src.ui.main_window import MainWindow
@@ -24,7 +26,7 @@ def main():
     app.setStyle("Fusion")
     
     # 创建并显示主窗口
-    window = MainWindow()
+    window = MainWindow(APP_VERSION)
     window.show()
     
     # 运行应用程序

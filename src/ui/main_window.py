@@ -13,17 +13,12 @@ from PyQt6.QtCore import Qt, QRectF, QPropertyAnimation, QEasingCurve, QParallel
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QIcon, QAction, QDesktopServices
 from PyQt6.QtSvg import QSvgRenderer
 
-from pptx import Presentation
-from PIL import Image
-import io
-
 from src.utils.ppt_processor import PPTProcessor
 from src.utils.layout_calculator import LayoutCalculator
 from src.ui.styles import STYLESHEET, COLORS, WELCOME_TEXT, STEPS_GUIDE
 from src.ui.loading_overlay import LoadingOverlay
 from src.ui.worker import Worker
 from src.ui.spinner_widget import SpinnerWidget
-from src._version import __version__ as CURRENT_VERSION
 
 GITHUB_REPO = "monthwolf/ppt-layout-tool" # 替换为自己GitHub仓库
 
@@ -205,9 +200,10 @@ class StepIndicator(QFrame):
             self.current_step = step
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, version):
         super().__init__()
-        self.setWindowTitle(f"PPT 布局工具 v{CURRENT_VERSION}")
+        self.version = version  # 保存版本号为实例变量
+        self.setWindowTitle(f"PPT 布局工具 v{version}")
         self.setMinimumSize(1100, 800)
         self.setWindowIcon(QIcon(get_resource_path("resources/app_icon.svg")))
 
@@ -257,7 +253,7 @@ class MainWindow(QMainWindow):
         msg_box.setWindowTitle("关于 PPT 布局工具")
         
         about_text = f"""
-            <h2 style="font-size: 18px; color: #333;">PPT 布局工具 v{CURRENT_VERSION}</h2>
+            <h2 style="font-size: 18px; color: #333;">PPT 布局工具 v{self.version}</h2>
             <p style="font-size: 13px; color: #555;">一款现代、高效的PPT排版与索引生成工具。</p>
             <p style="font-size: 13px; color: #555;">作者：<b>monthwolf</b></p>
             <p style="font-size: 13px; color: #555;">
@@ -1239,12 +1235,9 @@ class MainWindow(QMainWindow):
 
     def check_for_updates(self, silent=False):
         """在工作线程中检查GitHub上的新版本"""
-        if GITHUB_REPO == "YOUR_USERNAME/YOUR_REPOSITORY" or CURRENT_VERSION == "dev":
+        if GITHUB_REPO == "YOUR_USERNAME/YOUR_REPOSITORY":
             if not silent:
-                if CURRENT_VERSION == "dev":
-                    QMessageBox.information(self, "开发版", "您正在运行开发版本，已跳过更新检查。")
-                else:
-                    QMessageBox.warning(self, "未配置", "GitHub仓库地址未配置，无法检查更新。")
+                QMessageBox.warning(self, "未配置", "GitHub仓库地址未配置，无法检查更新。")
             else:
                 self.check_first_launch()
             return
@@ -1265,18 +1258,10 @@ class MainWindow(QMainWindow):
 
     def _on_update_check_finished(self, release_info, silent):
         """更新检查完成后的回调"""
-        # 如果是开发版，不进行版本比较
-        if CURRENT_VERSION == "dev":
-            if not silent:
-                QMessageBox.information(self, "开发版", "您正在运行开发版本，已跳过更新检查。")
-            else:
-                self.check_first_launch()
-            return
-
         latest_version_str = release_info.get("tag_name", "v0.0.0").lstrip('v')
         
         try:
-            current_v = version.parse(CURRENT_VERSION)
+            current_v = version.parse(self.version)
             latest_v = version.parse(latest_version_str)
             # print(latest_v)
 
