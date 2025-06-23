@@ -43,7 +43,7 @@ jobs:
           --add-data "resources;resources" `
           --add-data "pictures;pictures" `
           --icon="resources/app_icon.ico" `
-          --hidden-import "src._version" `
+          --collect-submodules src `
           src/main.py
           echo "EXE_NAME=$EXE_NAME" >> $env:GITHUB_OUTPUT
         env:
